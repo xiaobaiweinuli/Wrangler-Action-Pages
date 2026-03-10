@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1910,8 +1910,20 @@
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       document.getElementById('tab-btn-' + name).classList.add('active');
       document.getElementById('tab-' + name).classList.add('active');
-      if (name === 'versions') loadVersions();
-      if (name === 'commands') loadVersions(); // 同步 zip 下拉
+
+      // 版本管理：只在尚未加载时才自动触发（避免每次切 tab 都转圈）
+      // 已有数据则直接展示，用户可点刷新按钮手动更新
+      if (name === 'versions') {
+        const list = document.getElementById('versions-list');
+        const isBlank = list.querySelector('.loading-row') !== null || list.innerHTML.trim() === '';
+        if (isBlank) loadVersions();
+      }
+
+      // 命令 Tab：同步 zip 下拉，但只在下拉为空时才重新拉取
+      if (name === 'commands') {
+        const sel = document.getElementById('cmd-zip-select');
+        if (sel.options.length <= 1) loadVersions();
+      }
     }
 
     function toggleTheme() {
@@ -1973,11 +1985,12 @@
     // 初始化
     // ═══════════════════════════════════════════════
     (function init() {
+      // 主题优先级：localStorage → 系统偏好 → 浅色
       const saved = localStorage.getItem('cf_deploy_theme');
-      if (saved) {
-        document.documentElement.dataset.theme = saved;
-        document.getElementById('theme-toggle').textContent = saved === 'dark' ? '🌙' : '☀️';
-      }
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = saved || (prefersDark ? 'dark' : 'light');
+      document.documentElement.dataset.theme = theme;
+      document.getElementById('theme-toggle').textContent = theme === 'dark' ? '🌙' : '☀️';
 
       // 命令Tab 初始状态
       document.getElementById('cmd-textarea-row').style.display = 'block';

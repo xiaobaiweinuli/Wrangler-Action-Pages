@@ -1,5 +1,6 @@
 
-name = "cf-deploy"
+# wrangler.toml
+name = 'wrangler-action'
 main = "worker.js"
 compatibility_date = "2026-03-10"
 
