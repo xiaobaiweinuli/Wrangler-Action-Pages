@@ -1315,6 +1315,11 @@
         addRepoToHistory(repo);
         state.connected = true;
 
+        // 存入 sessionStorage，页面刷新后可自动恢复（关闭标签页自动清除）
+        sessionStorage.setItem('cf_pat',    pat);
+        sessionStorage.setItem('cf_repo',   repo);
+        sessionStorage.setItem('cf_branch', state.defaultBranch);
+
         // 更新 UI
         document.getElementById('auth-panel').style.display = 'none';
         document.getElementById('main-panel').classList.add('visible');
@@ -1341,6 +1346,11 @@
       state.pat = state.repo = '';
       state.connected = false;
       state.pendingBlob = null;
+
+      // 清除会话缓存
+      sessionStorage.removeItem('cf_pat');
+      sessionStorage.removeItem('cf_repo');
+      sessionStorage.removeItem('cf_branch');
 
       document.getElementById('auth-panel').style.display = 'block';
       document.getElementById('main-panel').classList.remove('visible');
@@ -1994,6 +2004,33 @@
 
       // 命令Tab 初始状态
       document.getElementById('cmd-textarea-row').style.display = 'block';
+
+      // ── 自动恢复会话（页面刷新 / 切换桌面模式后免重新登录）────
+      const savedPat    = sessionStorage.getItem('cf_pat');
+      const savedRepo   = sessionStorage.getItem('cf_repo');
+      const savedBranch = sessionStorage.getItem('cf_branch');
+
+      if (savedPat && savedRepo) {
+        // 填入表单（供浏览器密码管理器识别）
+        document.getElementById('repo-input').value = savedRepo;
+        document.getElementById('pat-input').value  = savedPat;
+
+        // 直接恢复状态，不再重新请求 API 验证（刷新前已验证过）
+        state.pat           = savedPat;
+        state.repo          = savedRepo;
+        state.defaultBranch = savedBranch || 'main';
+        state.connected     = true;
+
+        document.getElementById('auth-panel').style.display = 'none';
+        document.getElementById('main-panel').classList.add('visible');
+        document.getElementById('repo-badge').classList.add('visible');
+        document.getElementById('repo-badge-text').textContent = savedRepo;
+        document.getElementById('disconnect-btn').classList.add('visible');
+
+        loadVersions();
+        loadRuns();
+        startPoll();
+      }
     })();
 
   </script>
