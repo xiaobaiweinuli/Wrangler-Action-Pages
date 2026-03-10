@@ -570,14 +570,13 @@
 
     .version-item {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      flex-direction: column;
       padding: 14px 16px;
       background: var(--bg-input);
       border: 1px solid var(--border);
       border-radius: 10px;
       transition: border-color .2s;
-      gap: 12px;
+      gap: 10px;
     }
 
     .version-item:hover { border-color: var(--border-muted); }
@@ -586,7 +585,6 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      flex: 1;
       min-width: 0;
     }
 
@@ -612,7 +610,8 @@
     .version-actions {
       display: flex;
       gap: 8px;
-      flex-shrink: 0;
+      align-items: center;
+      flex-wrap: wrap;
     }
 
     /* ── Commands Tab ────────────────────────────────────── */
@@ -985,7 +984,6 @@
       #auth-panel { margin-top: 28px; }
       .auth-hero h1 { font-size: 26px; }
       .tab-btn span.tab-label { display: none; }
-      .version-actions { flex-direction: column; gap: 6px; }
       header { padding: 0 16px; }
       .repo-badge { display: none !important; }
       .cmd-mode-row { gap: 6px; }
@@ -1993,12 +1991,13 @@
                 </div>
               </div>
               <div class="version-actions">
-                <label class="version-debug-label" title="开启后可在 GitHub Actions 查看完整日志">
-                  <input type="checkbox" id="dbg-${f.sha.substring(0,8)}" style="accent-color:var(--accent);">
-                  调试
-                </label>
                 <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}','${f.sha.substring(0,8)}')">🚀 部署</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑</button>
+                <button class="btn btn-secondary btn-sm" onclick="downloadVersion('${f.name}','${f.download_url}')">⬇ 下载</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑 删除</button>
+                <label class="version-debug-label" title="开启后可在 GitHub Actions 查看完整日志" style="margin-left:auto;">
+                  <input type="checkbox" id="dbg-${f.sha.substring(0,8)}" style="accent-color:var(--accent);">
+                  调试模式
+                </label>
               </div>
             </div>
           `).join('') +
@@ -2058,6 +2057,22 @@
       await dispatchWorkflow({ mode: 'deploy', zip_file: filename, debug_mode: String(debug) });
       toast('已触发部署：' + filename, 'success');
       setTimeout(startDeployPoll, 1500);
+    }
+
+    async function downloadVersion(filename, downloadUrl) {
+      try {
+        toast('⬇ 正在获取下载链接...', 'info');
+        // GitHub Contents API 返回的 download_url 是直接链接，直接触发下载
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = filename;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch (e) {
+        toast('下载失败：' + e.message, 'error');
+      }
     }
 
     async function deleteVersion(filename, sha) {
@@ -2193,6 +2208,9 @@
       rawLines:   [],    // 当前 job 的日志行数组
       matches:    [],    // 搜索命中的行索引
       matchIndex: -1,
+      // ── 缓存：key = jobId，value = 日志行数组 ──────
+      jobLogCache: {},   // 关闭面板后保留，再次打开直接复用
+      runJobsCache: {},  // key = runId，value = jobs 数组
     };
 
     async function openLogModal(evt, runId, title, conclusion) {
@@ -2200,32 +2218,53 @@
       const overlay = document.getElementById('log-modal-overlay');
       overlay.classList.add('open');
       document.getElementById('log-modal-subtitle').textContent = title;
-      document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:4px 0;"><span class="spinning">⟳</span> 加载 Jobs...</span>';
-      document.getElementById('log-body').innerHTML     = '<div class="log-loading"><span class="spinning">⟳</span> 加载中...</div>';
       document.getElementById('log-search-input').value = '';
       document.getElementById('log-match-count').textContent = '';
       document.getElementById('log-prev-btn').style.display = 'none';
       document.getElementById('log-next-btn').style.display = 'none';
 
-      logState.runId     = runId;
-      logState.jobs      = [];
-      logState.rawLines  = [];
-      logState.matches   = [];
+      logState.runId      = runId;
+      logState.matches    = [];
       logState.matchIndex = -1;
+
+      // ── 命中 run jobs 缓存：直接恢复，不重新请求 ──
+      if (logState.runJobsCache[runId]) {
+        logState.jobs = logState.runJobsCache[runId];
+        renderJobsBar();
+
+        // 恢复上次选中的 job（若有）
+        const prevJob = logState.activeJob && logState.jobs.find(j => j.id === logState.activeJob.id);
+        const targetJob = prevJob || logState.jobs.find(j => j.conclusion === 'failure') || logState.jobs[0];
+
+        // 如果该 job 日志也有缓存，直接渲染
+        if (logState.jobLogCache[targetJob.id]) {
+          logState.activeJob = targetJob;
+          logState.rawLines  = logState.jobLogCache[targetJob.id];
+          document.querySelectorAll('.log-job-btn').forEach(b => b.classList.remove('active'));
+          const btn = document.getElementById('log-job-' + targetJob.id);
+          if (btn) btn.classList.add('active');
+          renderLogLines(logState.rawLines);
+        } else {
+          loadJobLog(targetJob);
+        }
+        return;
+      }
+
+      // ── 首次打开：需要请求 ──────────────────────────
+      document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:4px 0;"><span class="spinning">⟳</span> 加载 Jobs...</span>';
+      document.getElementById('log-body').innerHTML     = '<div class="log-loading"><span class="spinning">⟳</span> 加载中...</div>';
 
       try {
         const data = await gh('/repos/' + state.repo + '/actions/runs/' + runId + '/jobs');
         logState.jobs = data.jobs || [];
+        logState.runJobsCache[runId] = logState.jobs;  // 写入缓存
 
         if (!logState.jobs.length) {
           document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);">暂无 Job 信息</span>';
           return;
         }
 
-        // 渲染 job 选择栏
         renderJobsBar();
-
-        // 自动选第一个 job（失败优先）
         const failedJob = logState.jobs.find(j => j.conclusion === 'failure');
         loadJobLog(failedJob || logState.jobs[0]);
 
@@ -2247,21 +2286,26 @@
     }
 
     async function loadJobLog(job) {
-      // 更新 job 按钮激活状态
       document.querySelectorAll('.log-job-btn').forEach(b => b.classList.remove('active'));
       const btn = document.getElementById('log-job-' + job.id);
       if (btn) btn.classList.add('active');
 
-      logState.activeJob = job;
-      logState.rawLines  = [];
-      logState.matches   = [];
-
-      document.getElementById('log-body').innerHTML = '<div class="log-loading"><span class="spinning">⟳</span> 加载日志中...</div>';
+      logState.activeJob  = job;
+      logState.matches    = [];
+      logState.matchIndex = -1;
       document.getElementById('log-search-input').value = '';
       document.getElementById('log-match-count').textContent = '';
 
+      // ── 命中 job 日志缓存：直接渲染 ──────────────────
+      if (logState.jobLogCache[job.id]) {
+        logState.rawLines = logState.jobLogCache[job.id];
+        renderLogLines(logState.rawLines);
+        return;
+      }
+
+      document.getElementById('log-body').innerHTML = '<div class="log-loading"><span class="spinning">⟳</span> 加载日志中...</div>';
+
       try {
-        // 日志 API 返回纯文本（Worker 会 follow redirect 拿到实际内容）
         const res = await fetch('/api/github/repos/' + state.repo + '/actions/jobs/' + job.id + '/logs', {
           headers: {
             'Authorization': 'Bearer ' + state.pat,
@@ -2269,15 +2313,12 @@
             'X-GitHub-Api-Version': '2022-11-28',
           }
         });
-
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.message || 'HTTP ' + res.status);
         }
-
         const text = await res.text();
         renderLog(text);
-
       } catch (e) {
         document.getElementById('log-body').innerHTML =
           '<div class="log-error">加载日志失败：' + escHtml(friendlyGhError(e.message)) + '<br><small>也可点 ↗ 在 GitHub 查看完整日志</small></div>';
@@ -2285,30 +2326,26 @@
     }
 
     function renderLog(text) {
-      // 每行格式：2024-01-01T00:00:00.0000000Z 内容
-      // 去掉时间戳前缀，保留内容
       const raw = text.split('\n');
-      // 去掉结尾空行
       while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
       logState.rawLines = raw;
+      // 写入缓存
+      if (logState.activeJob) {
+        logState.jobLogCache[logState.activeJob.id] = raw;
+      }
+      renderLogLines(raw);
+    }
 
-      const pre = document.getElementById('log-pre') || (() => {
-        const el = document.createElement('pre');
-        el.id = 'log-pre';
-        return el;
-      })();
-
+    function renderLogLines(raw) {
+      const pre = document.createElement('pre');
+      pre.id = 'log-pre';
       pre.innerHTML = raw.map((line, i) => {
-        // 去掉 ISO 时间戳前缀（保留日志正文）
         const content = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /, '');
         return `<div class="log-line" id="ll-${i}"><span class="log-ln">${i + 1}</span><span class="log-text">${escHtml(content)}</span></div>`;
       }).join('');
-
       const body = document.getElementById('log-body');
       body.innerHTML = '';
       body.appendChild(pre);
-
-      // 自动滚到底（最新日志）
       body.scrollTop = body.scrollHeight;
     }
 
@@ -2389,7 +2426,7 @@
     function closeLogModal(evt) {
       if (evt && evt.target !== document.getElementById('log-modal-overlay')) return;
       document.getElementById('log-modal-overlay').classList.remove('open');
-      logState.rawLines = [];
+      // 不清 rawLines / cache，下次打开同一条记录直接复用
     }
 
     // ═══════════════════════════════════════════════
