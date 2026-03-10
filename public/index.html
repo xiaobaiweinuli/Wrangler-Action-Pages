@@ -1101,9 +1101,18 @@
             <!-- ZIP select (for deploy / all mode) -->
             <div id="cmd-zip-row">
               <div class="form-label" style="margin-bottom:6px;">选择压缩包</div>
-              <select id="cmd-zip-select" class="form-input mono" style="font-size:13px;">
-                <option value="">自动选最新</option>
-              </select>
+              <div class="input-wrap">
+                <input
+                  type="text"
+                  id="cmd-zip-input"
+                  class="form-input mono"
+                  placeholder="自动选最新"
+                  readonly
+                  style="cursor:pointer;"
+                  onclick="toggleZipDropdown()"
+                >
+                <div class="repo-dropdown" id="cmd-zip-dropdown"></div>
+              </div>
             </div>
 
             <!-- Commands textarea -->
@@ -1134,7 +1143,7 @@
         <div class="card">
           <div class="card-header">
             <div class="card-title">📋 最近运行记录</div>
-            <button class="btn btn-ghost btn-sm" onclick="loadRuns()">🔄</button>
+            <button class="btn btn-ghost btn-sm" id="runs-refresh-btn" onclick="loadRuns()">🔄</button>
           </div>
           <div id="runs-list" style="padding:0;">
             <div class="loading-row">
@@ -1216,7 +1225,10 @@
     repoInput.addEventListener('input', renderRepoDropdown);
 
     document.addEventListener('click', (e) => {
-      if (!e.target.closest('.input-wrap')) repoDropdown.classList.remove('open');
+      if (!e.target.closest('.input-wrap')) {
+        repoDropdown.classList.remove('open');
+        document.getElementById('cmd-zip-dropdown').classList.remove('open');
+      }
     });
 
     function renderRepoDropdown() {
@@ -1330,7 +1342,6 @@
         toast('已连接到 ' + repo, 'success');
         loadVersions();
         loadRuns();
-        startPoll();
 
       } catch (e) {
         toast('连接失败：' + e.message, 'error');
@@ -1342,7 +1353,7 @@
     }
 
     function disconnect() {
-      clearInterval(state.pollTimer);
+      stopDeployPoll();
       state.pat = state.repo = '';
       state.connected = false;
       state.pendingBlob = null;
@@ -1633,7 +1644,7 @@
         toast('🎉 ' + filename + ' 上传成功，部署中...', 'success');
 
         clearFile();
-        setTimeout(() => { loadRuns(); loadVersions(); }, 2000);
+        setTimeout(() => { loadVersions(); startDeployPoll(); }, 2000);
 
       } catch (e) {
         toast('失败：' + e.message, 'error');
@@ -1767,17 +1778,55 @@
       }
     }
 
+    // zip 下拉数据缓存（供渲染用）
+    let _zipList = [];
+
     function updateCmdZipSelect(zips) {
-      const sel = document.getElementById('cmd-zip-select');
-      sel.innerHTML = '<option value="">自动选最新</option>' +
-        zips.map(z => `<option value="${z.name}">${z.name}</option>`).join('');
+      _zipList = zips;
+      renderZipDropdown();
+    }
+
+    function renderZipDropdown() {
+      const dropdown = document.getElementById('cmd-zip-dropdown');
+      const input    = document.getElementById('cmd-zip-input');
+      const current  = input.dataset.value || '';
+
+      const items = [{ name: '', label: '✦ 自动选最新' }, ..._zipList.map(z => ({ name: z.name, label: z.name }))];
+
+      dropdown.innerHTML = items.map(item => `
+        <div
+          class="repo-dropdown-item${item.name === current ? ' selected' : ''}"
+          onclick="selectZip('${item.name}', '${item.label}')"
+          style="${item.name === current ? 'color:var(--accent);' : ''}"
+        >
+          <span>${item.label}</span>
+          ${item.name === current ? '<span style="color:var(--accent);font-size:13px;">✓</span>' : ''}
+        </div>
+      `).join('');
+    }
+
+    function toggleZipDropdown() {
+      const dropdown = document.getElementById('cmd-zip-dropdown');
+      const isOpen   = dropdown.classList.contains('open');
+      // 先关所有下拉
+      repoDropdown.classList.remove('open');
+      dropdown.classList.toggle('open', !isOpen);
+      if (!isOpen) renderZipDropdown();
+    }
+
+    function selectZip(value, label) {
+      const input = document.getElementById('cmd-zip-input');
+      input.dataset.value = value;
+      input.value         = value ? label : '';
+      input.placeholder   = value ? '' : '自动选最新';
+      document.getElementById('cmd-zip-dropdown').classList.remove('open');
     }
 
     async function deployVersion(filename) {
       const debug = false;
       await dispatchWorkflow({ mode: 'deploy', zip_file: filename, debug_mode: String(debug) });
       toast('已触发部署：' + filename, 'success');
-      setTimeout(loadRuns, 1500);
+      setTimeout(startDeployPoll, 1500);
     }
 
     async function deleteVersion(filename, sha) {
@@ -1818,7 +1867,7 @@
 
     async function triggerWorkflow() {
       const cmd   = document.getElementById('cmd-input').value.trim();
-      const zip   = document.getElementById('cmd-zip-select').value;
+      const zip   = document.getElementById('cmd-zip-input').dataset.value || '';
       const debug = document.getElementById('cmd-debug-check').checked;
 
       if ((currentMode === 'wrangler-command' || currentMode === 'all') && !cmd) {
@@ -1841,7 +1890,7 @@
       try {
         await dispatchWorkflow(inputs);
         toast('✅ 已触发 workflow，请在「运行记录」查看进度', 'success');
-        setTimeout(loadRuns, 1500);
+        setTimeout(startDeployPoll, 1500);
       } catch (e) {
         toast('触发失败：' + e.message, 'error');
       }
@@ -1899,17 +1948,70 @@
       return '<span class="badge badge-muted">' + (conclusion || status) + '</span>';
     }
 
-    function startPoll() {
-      clearInterval(state.pollTimer);
+    // ═══════════════════════════════════════════════
+    // 部署后定时轮询（最多 2 分钟，完成后自动停止）
+    // ═══════════════════════════════════════════════
+    const POLL_INTERVAL = 5000;       // 5 秒轮询一次
+    const POLL_TIMEOUT  = 120 * 1000; // 最多 2 分钟
+
+    function startDeployPoll() {
+      // 清除已有轮询
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        clearTimeout(state.pollTimeout);
+        state.pollTimer = null;
+      }
+
+      const btn       = document.getElementById('runs-refresh-btn');
+      const startTime = Date.now();
+
+      // 刷新按钮变为旋转动画，表示正在轮询
+      btn.innerHTML  = '<span class="spinning">⟳</span>';
+      btn.disabled   = true;
+      btn.title      = '部署进行中，自动刷新中...';
+
+      // 先立刻刷新一次
+      loadRuns();
+
       state.pollTimer = setInterval(async () => {
+        // 超时：停止轮询
+        if (Date.now() - startTime >= POLL_TIMEOUT) {
+          stopDeployPoll();
+          toast('⏱ 部署超时（2 分钟），可手动点刷新查看最新结果', 'info');
+          return;
+        }
+
         try {
-          const data = await gh('/repos/' + state.repo + '/actions/runs?per_page=3');
-          const active = (data.workflow_runs || []).some(r =>
-            r.status === 'queued' || r.status === 'in_progress'
-          );
-          if (active) loadRuns();
+          const data  = await gh('/repos/' + state.repo + '/actions/runs?per_page=3&workflow_id=deploy.yml');
+          const runs  = data.workflow_runs || [];
+          const active = runs.some(r => r.status === 'queued' || r.status === 'in_progress');
+
+          // 刷新列表
+          await loadRuns();
+
+          // 无进行中任务 → 取最新一条判断结果
+          if (!active && runs.length) {
+            stopDeployPoll();
+            const latest = runs[0];
+            if (latest.conclusion === 'success') {
+              toast('🎉 部署成功！', 'success');
+            } else if (latest.conclusion === 'failure') {
+              toast('❌ 部署失败，点击运行记录右侧 ↗ 查看日志', 'error');
+            } else if (latest.conclusion === 'cancelled') {
+              toast('⊘ 部署已取消', 'info');
+            }
+          }
         } catch (_) {}
-      }, 8000);
+      }, POLL_INTERVAL);
+    }
+
+    function stopDeployPoll() {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+      const btn    = document.getElementById('runs-refresh-btn');
+      btn.innerHTML = '🔄';
+      btn.disabled  = false;
+      btn.title     = '';
     }
 
     // ═══════════════════════════════════════════════
@@ -1931,8 +2033,7 @@
 
       // 命令 Tab：同步 zip 下拉，但只在下拉为空时才重新拉取
       if (name === 'commands') {
-        const sel = document.getElementById('cmd-zip-select');
-        if (sel.options.length <= 1) loadVersions();
+        if (_zipList.length === 0) loadVersions();
       }
     }
 
@@ -2029,7 +2130,6 @@
 
         loadVersions();
         loadRuns();
-        startPoll();
       }
     })();
 
