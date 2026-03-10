@@ -61,9 +61,9 @@ export default {
     }
 
     // 回传 GitHub 响应，附加 CORS 头
-    const resHeaders = corsHeaders(
-      githubRes.headers.get('content-type') || 'application/json'
-    );
+    // 透传原始 Content-Type（日志接口返回 text/plain，不能强制覆盖为 JSON）
+    const originCT = githubRes.headers.get('content-type') || 'application/json';
+    const resHeaders = corsHeaders(originCT);
     // 保留分页相关头（Link）
     const link = githubRes.headers.get('link');
     if (link) resHeaders.set('link', link);

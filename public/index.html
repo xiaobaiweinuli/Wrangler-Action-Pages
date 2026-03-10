@@ -900,8 +900,87 @@
     #step-encode { display: none; }
     #step-encode.visible { display: flex; }
 
+    /* ── Log Modal ───────────────────────────────────────── */
+    .log-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      z-index: 1000;
+      align-items: flex-end;
+      justify-content: center;
+      backdrop-filter: blur(3px);
+    }
+    .log-modal-overlay.open { display: flex; }
 
-    @media (max-width: 600px) {
+    .log-modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px 16px 0 0;
+      width: 100%;
+      max-width: 860px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow);
+      animation: slideUp .25s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(60px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    .log-modal-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .log-modal-title { font-size: 15px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; }
+    .log-modal-title small {
+      font-size: 12px; color: var(--text-muted); font-weight: 400;
+      display: block; margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .log-jobs-bar {
+      display: flex; gap: 6px; padding: 10px 20px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+    }
+    .log-job-btn {
+      padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border);
+      background: var(--bg-input); color: var(--text-muted); font-size: 12px;
+      cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all .15s;
+    }
+    .log-job-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .log-job-btn.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+    .log-toolbar {
+      display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg-input);
+    }
+    .log-search-input {
+      flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 5px 10px; font-size: 12px; color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .log-search-input:focus { outline: none; border-color: var(--accent); }
+    .log-match-count { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+    .log-body { flex: 1; overflow-y: auto; }
+    #log-pre {
+      margin: 0; padding: 14px 16px;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
+      line-height: 1.7; color: var(--text); white-space: pre-wrap; word-break: break-all;
+    }
+    .log-line { display: flex; gap: 10px; }
+    .log-line:hover { background: var(--bg-hover); }
+    .log-ln { color: var(--text-dim); user-select: none; min-width: 36px; text-align: right; flex-shrink: 0; }
+    .log-text { flex: 1; word-break: break-all; }
+    .log-highlight { background: #f59e0b44; border-radius: 2px; }
+    .log-loading { padding: 40px; text-align: center; color: var(--text-muted); font-size: 14px; }
+    .log-error   { padding: 24px; color: var(--error); font-size: 13px; text-align: center; }
+    .run-item { cursor: pointer; }
+
+
       .container { padding: 20px 14px 48px; }
       #auth-panel { margin-top: 28px; }
       .auth-hero h1 { font-size: 26px; }
@@ -944,6 +1023,30 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeModal()">取消</button>
         <button class="btn btn-danger" id="modal-confirm-btn">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log Modal -->
+  <div class="log-modal-overlay" id="log-modal-overlay" onclick="closeLogModal(event)">
+    <div class="log-modal" onclick="event.stopPropagation()">
+      <div class="log-modal-header">
+        <div class="log-modal-title">
+          📋 运行日志
+          <small id="log-modal-subtitle">—</small>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="log-copy-btn" onclick="copyLogText()" title="复制日志">📋 复制</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeLogModal()" title="关闭">✕</button>
+      </div>
+      <div class="log-jobs-bar" id="log-jobs-bar"></div>
+      <div class="log-toolbar">
+        <input class="log-search-input" id="log-search-input" placeholder="搜索日志..." oninput="searchLog()" type="search">
+        <span class="log-match-count" id="log-match-count"></span>
+        <button class="btn btn-ghost btn-sm" id="log-prev-btn" onclick="navMatch(-1)" style="display:none;">↑</button>
+        <button class="btn btn-ghost btn-sm" id="log-next-btn" onclick="navMatch(1)"  style="display:none;">↓</button>
+      </div>
+      <div class="log-body" id="log-body">
+        <div class="log-loading"><span class="spinning">⟳</span> 加载日志中...</div>
       </div>
     </div>
   </div>
@@ -1005,7 +1108,7 @@
                   placeholder="ghp_xxxxxxxxxxxx"
                   required
                 >
-                <button type="button" class="pat-eye" id="pat-eye-btn" onclick="togglePatVisibility()" title="显示/隐藏 Token">👁</button>
+                <button type="button" class="pat-eye" id="pat-eye-btn" onclick="togglePatVisibility()" title="显示 Token">🙈</button>
               </div>
             </div>
 
@@ -1271,7 +1374,7 @@
       const btn   = document.getElementById('pat-eye-btn');
       const show  = input.type === 'password';
       input.type  = show ? 'text' : 'password';
-      btn.textContent = show ? '🙈' : '👁';
+      btn.textContent = show ? '👁' : '🙈';
       btn.title   = show ? '隐藏 Token' : '显示 Token';
     }
 
@@ -2047,18 +2150,22 @@
         }
 
         el.innerHTML = runs.map(r => {
-          const badge = statusBadge(r.status, r.conclusion);
-          const time  = relativeTime(r.updated_at);
-          const title = r.display_title || r.head_commit?.message || r.name;
+          const badge    = statusBadge(r.status, r.conclusion);
+          const time     = relativeTime(r.updated_at);
+          const title    = r.display_title || r.head_commit?.message || r.name;
+          const canLog   = r.status === 'completed';
+          const logBtn   = canLog
+            ? `<button class="btn btn-ghost btn-sm run-log-btn" onclick="openLogModal(event,${r.id},'${escHtml(title).replace(/'/g,"\\'")}','${r.conclusion}')" title="查看日志">📄 日志</button>`
+            : '';
           return `
             <div class="run-item">
               <div class="run-status">${badge}</div>
               <div class="run-name">
                 <div class="run-title">${escHtml(title)}</div>
-                <div class="run-sub">${r.event === 'push' ? '📤 Push 触发' : '🖐 手动触发'}</div>
+                <div class="run-sub">${r.event === 'push' ? '📤 Push 触发' : '🖐 手动触发'} · ${time}</div>
               </div>
-              <div class="run-time">${time}</div>
-              <a href="${r.html_url}" target="_blank" class="btn btn-ghost btn-sm" title="在 GitHub 查看">↗</a>
+              ${logBtn}
+              <a href="${r.html_url}" target="_blank" class="btn btn-ghost btn-sm" title="在 GitHub 查看" onclick="event.stopPropagation()">↗</a>
             </div>`;
         }).join('');
 
@@ -2068,12 +2175,221 @@
     }
 
     function statusBadge(status, conclusion) {
-      if (status === 'queued')      return '<span class="badge badge-muted">⏳ 排队</span>';
-      if (status === 'in_progress') return '<span class="badge badge-info"><span class="spinning">⟳</span> 运行中</span>';
-      if (conclusion === 'success') return '<span class="badge badge-success">✅ 成功</span>';
-      if (conclusion === 'failure') return '<span class="badge badge-error">❌ 失败</span>';
+      if (status === 'queued')        return '<span class="badge badge-muted">⏳ 排队</span>';
+      if (status === 'in_progress')   return '<span class="badge badge-info"><span class="spinning">⟳</span> 运行中</span>';
+      if (conclusion === 'success')   return '<span class="badge badge-success">✅ 成功</span>';
+      if (conclusion === 'failure')   return '<span class="badge badge-error">❌ 失败</span>';
       if (conclusion === 'cancelled') return '<span class="badge badge-muted">⊘ 取消</span>';
       return '<span class="badge badge-muted">' + (conclusion || status) + '</span>';
+    }
+
+    // ═══════════════════════════════════════════════
+    // 日志模态框
+    // ═══════════════════════════════════════════════
+    const logState = {
+      runId:      null,
+      jobs:       [],
+      activeJob:  null,
+      rawLines:   [],    // 当前 job 的日志行数组
+      matches:    [],    // 搜索命中的行索引
+      matchIndex: -1,
+    };
+
+    async function openLogModal(evt, runId, title, conclusion) {
+      evt.stopPropagation();
+      const overlay = document.getElementById('log-modal-overlay');
+      overlay.classList.add('open');
+      document.getElementById('log-modal-subtitle').textContent = title;
+      document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:4px 0;"><span class="spinning">⟳</span> 加载 Jobs...</span>';
+      document.getElementById('log-body').innerHTML     = '<div class="log-loading"><span class="spinning">⟳</span> 加载中...</div>';
+      document.getElementById('log-search-input').value = '';
+      document.getElementById('log-match-count').textContent = '';
+      document.getElementById('log-prev-btn').style.display = 'none';
+      document.getElementById('log-next-btn').style.display = 'none';
+
+      logState.runId     = runId;
+      logState.jobs      = [];
+      logState.rawLines  = [];
+      logState.matches   = [];
+      logState.matchIndex = -1;
+
+      try {
+        const data = await gh('/repos/' + state.repo + '/actions/runs/' + runId + '/jobs');
+        logState.jobs = data.jobs || [];
+
+        if (!logState.jobs.length) {
+          document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);">暂无 Job 信息</span>';
+          return;
+        }
+
+        // 渲染 job 选择栏
+        renderJobsBar();
+
+        // 自动选第一个 job（失败优先）
+        const failedJob = logState.jobs.find(j => j.conclusion === 'failure');
+        loadJobLog(failedJob || logState.jobs[0]);
+
+      } catch (e) {
+        document.getElementById('log-body').innerHTML =
+          '<div class="log-error">加载 Jobs 失败：' + escHtml(friendlyGhError(e.message)) + '</div>';
+        document.getElementById('log-jobs-bar').innerHTML = '';
+      }
+    }
+
+    function renderJobsBar() {
+      document.getElementById('log-jobs-bar').innerHTML = logState.jobs.map(j => {
+        const icon = j.conclusion === 'success' ? '✅'
+          : j.conclusion === 'failure' ? '❌'
+          : j.status === 'in_progress' ? '⟳'
+          : '⏸';
+        return `<button class="log-job-btn" id="log-job-${j.id}" onclick="loadJobLog(logState.jobs.find(x=>x.id===${j.id}))">${icon} ${escHtml(j.name)}</button>`;
+      }).join('');
+    }
+
+    async function loadJobLog(job) {
+      // 更新 job 按钮激活状态
+      document.querySelectorAll('.log-job-btn').forEach(b => b.classList.remove('active'));
+      const btn = document.getElementById('log-job-' + job.id);
+      if (btn) btn.classList.add('active');
+
+      logState.activeJob = job;
+      logState.rawLines  = [];
+      logState.matches   = [];
+
+      document.getElementById('log-body').innerHTML = '<div class="log-loading"><span class="spinning">⟳</span> 加载日志中...</div>';
+      document.getElementById('log-search-input').value = '';
+      document.getElementById('log-match-count').textContent = '';
+
+      try {
+        // 日志 API 返回纯文本（Worker 会 follow redirect 拿到实际内容）
+        const res = await fetch('/api/github/repos/' + state.repo + '/actions/jobs/' + job.id + '/logs', {
+          headers: {
+            'Authorization': 'Bearer ' + state.pat,
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          }
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'HTTP ' + res.status);
+        }
+
+        const text = await res.text();
+        renderLog(text);
+
+      } catch (e) {
+        document.getElementById('log-body').innerHTML =
+          '<div class="log-error">加载日志失败：' + escHtml(friendlyGhError(e.message)) + '<br><small>也可点 ↗ 在 GitHub 查看完整日志</small></div>';
+      }
+    }
+
+    function renderLog(text) {
+      // 每行格式：2024-01-01T00:00:00.0000000Z 内容
+      // 去掉时间戳前缀，保留内容
+      const raw = text.split('\n');
+      // 去掉结尾空行
+      while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
+      logState.rawLines = raw;
+
+      const pre = document.getElementById('log-pre') || (() => {
+        const el = document.createElement('pre');
+        el.id = 'log-pre';
+        return el;
+      })();
+
+      pre.innerHTML = raw.map((line, i) => {
+        // 去掉 ISO 时间戳前缀（保留日志正文）
+        const content = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /, '');
+        return `<div class="log-line" id="ll-${i}"><span class="log-ln">${i + 1}</span><span class="log-text">${escHtml(content)}</span></div>`;
+      }).join('');
+
+      const body = document.getElementById('log-body');
+      body.innerHTML = '';
+      body.appendChild(pre);
+
+      // 自动滚到底（最新日志）
+      body.scrollTop = body.scrollHeight;
+    }
+
+    // ── 日志搜索 ──────────────────────────────────────
+    function searchLog() {
+      const q = document.getElementById('log-search-input').value.trim();
+      logState.matches    = [];
+      logState.matchIndex = -1;
+
+      // 清除旧高亮
+      document.querySelectorAll('.log-text').forEach(el => {
+        el.innerHTML = escHtml(el.textContent);
+        el.classList.remove('log-highlight');
+      });
+
+      const countEl = document.getElementById('log-match-count');
+      const prevBtn  = document.getElementById('log-prev-btn');
+      const nextBtn  = document.getElementById('log-next-btn');
+
+      if (!q || !logState.rawLines.length) {
+        countEl.textContent = '';
+        prevBtn.style.display = 'none';
+        nextBtn.style.display = 'none';
+        return;
+      }
+
+      const qLower = q.toLowerCase();
+      logState.rawLines.forEach((line, i) => {
+        const content = line.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z /, '');
+        if (content.toLowerCase().includes(qLower)) {
+          logState.matches.push(i);
+          // 高亮匹配行
+          const el = document.getElementById('ll-' + i);
+          if (el) {
+            const span = el.querySelector('.log-text');
+            // 替换匹配文字为高亮 span（大小写不敏感）
+            const escaped = escHtml(content);
+            const regex   = new RegExp('(' + escRegex(escHtml(q)) + ')', 'gi');
+            span.innerHTML = escaped.replace(regex, '<mark class="log-highlight">$1</mark>');
+          }
+        }
+      });
+
+      const cnt = logState.matches.length;
+      countEl.textContent = cnt ? cnt + ' 处' : '无匹配';
+      prevBtn.style.display = cnt ? '' : 'none';
+      nextBtn.style.display = cnt ? '' : 'none';
+
+      if (cnt) navMatch(1); // 跳到第一处
+    }
+
+    function navMatch(dir) {
+      const { matches } = logState;
+      if (!matches.length) return;
+      logState.matchIndex = (logState.matchIndex + dir + matches.length) % matches.length;
+      const lineIdx = matches[logState.matchIndex];
+      const el = document.getElementById('ll-' + lineIdx);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('log-match-count').textContent =
+        (logState.matchIndex + 1) + ' / ' + matches.length;
+    }
+
+    function escRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+    async function copyLogText() {
+      const text = logState.rawLines.join('\n');
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        const btn = document.getElementById('log-copy-btn');
+        btn.textContent = '✅ 已复制';
+        setTimeout(() => { btn.textContent = '📋 复制'; }, 2000);
+      } catch (_) {
+        toast('复制失败，请手动选择文本', 'error');
+      }
+    }
+
+    function closeLogModal(evt) {
+      if (evt && evt.target !== document.getElementById('log-modal-overlay')) return;
+      document.getElementById('log-modal-overlay').classList.remove('open');
+      logState.rawLines = [];
     }
 
     // ═══════════════════════════════════════════════
