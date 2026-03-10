@@ -1994,7 +1994,7 @@
                 <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}','${f.sha.substring(0,8)}')">🚀 部署</button>
                 <button class="btn btn-secondary btn-sm" onclick="downloadVersion('${f.name}','${f.download_url}')">⬇ 下载</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑 删除</button>
-                <label class="version-debug-label" title="开启后可在 GitHub Actions 查看完整日志" style="margin-left:auto;">
+                <label class="version-debug-label" title="开启后可在 GitHub Actions 查看完整日志">
                   <input type="checkbox" id="dbg-${f.sha.substring(0,8)}" style="accent-color:var(--accent);">
                   调试模式
                 </label>
@@ -2061,15 +2061,18 @@
 
     async function downloadVersion(filename, downloadUrl) {
       try {
-        toast('⬇ 正在获取下载链接...', 'info');
-        // GitHub Contents API 返回的 download_url 是直接链接，直接触发下载
+        // 将 raw.githubusercontent.com/owner/repo/branch/file 转为 /api/raw/owner/repo/branch/file
+        // download_url 格式：https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{file}
+        const rawPath = downloadUrl.replace('https://raw.githubusercontent.com', '');
+        const proxyUrl = '/api/raw' + rawPath;
+
         const a = document.createElement('a');
-        a.href = downloadUrl;
+        a.href = proxyUrl;
         a.download = filename;
-        a.target = '_blank';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        toast('⬇ 开始下载 ' + filename, 'info');
       } catch (e) {
         toast('下载失败：' + e.message, 'error');
       }
