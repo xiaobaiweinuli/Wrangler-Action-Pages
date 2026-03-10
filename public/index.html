@@ -839,7 +839,68 @@
       font-size: 14px;
     }
 
-    /* ── Mobile ──────────────────────────────────────────── */
+    /* ── PAT 显示/隐藏 ───────────────────────────────── */
+    .pat-wrap { position: relative; }
+    .pat-wrap .form-input { padding-right: 42px; }
+    .pat-eye {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 17px;
+      padding: 4px;
+      line-height: 1;
+      transition: color .2s;
+    }
+    .pat-eye:hover { color: var(--text); }
+
+    /* ── folder-name-row 平滑展开 ────────────────────── */
+    #folder-name-row {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height .3s ease, opacity .25s ease, margin .3s ease;
+      margin-bottom: 0;
+    }
+    #folder-name-row.show {
+      max-height: 120px;
+      opacity: 1;
+      margin-bottom: 14px;
+    }
+
+    /* ── 命令行实时校验 ──────────────────────────────── */
+    .cmd-line-error {
+      background: var(--error-dim);
+      color: var(--error);
+      border-radius: 4px;
+      font-size: 12px;
+      padding: 3px 8px;
+      margin-top: 6px;
+      display: none;
+    }
+    .cmd-line-error.show { display: block; }
+    .form-textarea.has-error { border-color: var(--error); }
+
+    /* ── 版本调试开关 ────────────────────────────────── */
+    .version-debug-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    /* ── 进度步骤扩展（编码步骤）────────────────────── */
+    #step-encode { display: none; }
+    #step-encode.visible { display: flex; }
+
+
     @media (max-width: 600px) {
       .container { padding: 20px 14px 48px; }
       #auth-panel { margin-top: 28px; }
@@ -934,15 +995,18 @@
                 GitHub PAT
                 <a href="https://github.com/settings/tokens" target="_blank" style="margin-left:6px;font-size:11px;">创建 Token →</a>
               </label>
-              <input
-                type="password"
-                id="pat-input"
-                name="password"
-                autocomplete="current-password"
-                class="form-input mono"
-                placeholder="ghp_xxxxxxxxxxxx"
-                required
-              >
+              <div class="pat-wrap">
+                <input
+                  type="password"
+                  id="pat-input"
+                  name="password"
+                  autocomplete="current-password"
+                  class="form-input mono"
+                  placeholder="ghp_xxxxxxxxxxxx"
+                  required
+                >
+                <button type="button" class="pat-eye" id="pat-eye-btn" onclick="togglePatVisibility()" title="显示/隐藏 Token">👁</button>
+              </div>
             </div>
 
             <button type="submit" class="btn btn-primary" id="connect-btn" style="width:100%;justify-content:center;margin-top:4px;">
@@ -1027,15 +1091,16 @@
                 <span class="zip-suffix">.zip</span>
               </div>
 
-              <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+              <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 <button class="btn btn-primary" id="upload-btn" onclick="startUpload()">
                   ☁ 上传并部署
                 </button>
-                <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer;">
+                <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer;" title="开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启">
                   <input type="checkbox" id="debug-mode-check" style="accent-color:var(--accent);">
                   调试模式
                 </label>
               </div>
+              <div class="form-hint" style="margin-top:8px;">调试模式：开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启</div>
             </div>
 
             <!-- Progress -->
@@ -1048,6 +1113,10 @@
                     <div class="progress-bar" id="pack-progress-bar" style="width:0%"></div>
                   </div>
                 </div>
+              </div>
+              <div class="progress-step" id="step-encode">
+                <div class="step-icon">⏸</div>
+                <div id="step-encode-text">等待编码...</div>
               </div>
               <div class="progress-step" id="step-upload">
                 <div class="step-icon">⏸</div>
@@ -1122,7 +1191,9 @@
                 id="cmd-input"
                 class="form-textarea"
                 placeholder="wrangler d1 create my-db&#10;wrangler vectorize create email-vectors --dimensions=768"
+                oninput="validateCmdInput()"
               ></textarea>
+              <div class="cmd-line-error" id="cmd-line-error"></div>
               <div class="form-hint">空行和 # 开头的注释行会自动跳过。命令在仓库根目录执行。</div>
             </div>
 
@@ -1193,8 +1264,61 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Repo 历史（localStorage）
+    // PAT 显示 / 隐藏
     // ═══════════════════════════════════════════════
+    function togglePatVisibility() {
+      const input = document.getElementById('pat-input');
+      const btn   = document.getElementById('pat-eye-btn');
+      const show  = input.type === 'password';
+      input.type  = show ? 'text' : 'password';
+      btn.textContent = show ? '🙈' : '👁';
+      btn.title   = show ? '隐藏 Token' : '显示 Token';
+    }
+
+    // ═══════════════════════════════════════════════
+    // GitHub API 错误友好提示映射
+    // ═══════════════════════════════════════════════
+    function friendlyGhError(msg) {
+      if (!msg) return '未知错误';
+      const m = msg.toLowerCase();
+      if (m.includes('bad credentials'))      return 'PAT 无效或已过期，请前往 GitHub 重新生成';
+      if (m.includes('not found'))            return '仓库不存在，或 PAT 没有访问该仓库的权限';
+      if (m.includes('rate limit'))           return 'GitHub API 请求超限，请稍后再试';
+      if (m.includes('requires authentication')) return '需要登录，请检查 PAT 是否正确';
+      if (m.includes('forbidden'))            return 'PAT 权限不足，请确认已勾选 repo 和 workflow 权限';
+      if (m.includes('unprocessable'))        return '请求参数错误，请检查仓库地址格式是否为 owner/repo';
+      if (m.includes('network') || m.includes('fetch')) return '网络请求失败，请检查网络连接';
+      return msg;
+    }
+
+    // ═══════════════════════════════════════════════
+    // 命令输入框实时校验
+    // ═══════════════════════════════════════════════
+    function validateCmdInput() {
+      const textarea  = document.getElementById('cmd-input');
+      const errorDiv  = document.getElementById('cmd-line-error');
+      const lines     = textarea.value.split('\n');
+      const badLines  = [];
+
+      lines.forEach((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return; // 跳过空行和注释
+        if (!/^wrangler\s/.test(trimmed)) {
+          badLines.push('第 ' + (i + 1) + ' 行：' + trimmed);
+        }
+      });
+
+      if (badLines.length) {
+        textarea.classList.add('has-error');
+        errorDiv.textContent = '以下命令不以 wrangler 开头：' + badLines.join('；');
+        errorDiv.classList.add('show');
+      } else {
+        textarea.classList.remove('has-error');
+        errorDiv.classList.remove('show');
+      }
+    }
+
+
     function getRepoHistory() {
       try { return JSON.parse(localStorage.getItem('cf_deploy_repos') || '[]'); }
       catch { return []; }
@@ -1762,11 +1886,15 @@
                 <div class="version-icon">🗜️</div>
                 <div class="version-meta">
                   <div class="version-name">${f.name}</div>
-                  <div class="version-detail">${formatSize(f.size)}</div>
+                  <div class="version-detail">${formatSize(f.size)}${f._time ? ' · ' + f._time : ''}</div>
                 </div>
               </div>
               <div class="version-actions">
-                <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}')">🚀 部署</button>
+                <label class="version-debug-label" title="开启后可在 GitHub Actions 查看完整日志">
+                  <input type="checkbox" id="dbg-${f.sha.substring(0,8)}" style="accent-color:var(--accent);">
+                  调试
+                </label>
+                <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}','${f.sha.substring(0,8)}')">🚀 部署</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑</button>
               </div>
             </div>
