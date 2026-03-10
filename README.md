@@ -6,13 +6,36 @@
 
 ## 在线访问
 
-将 `index.html` 推送到任意 GitHub 仓库的根目录，在仓库 **Settings → Pages → Source** 选择 `main` 分支，等待几分钟后即可通过 `https://你的用户名.github.io/仓库名` 访问。
+有两种托管方式，选择其一即可。
+
+### 方式一：GitHub Pages
+
+将本仓库推送到 GitHub，在仓库 **Settings → Pages → Source** 选择 `main` 分支根目录，等待几分钟后通过 `https://你的用户名.github.io/仓库名` 访问。
+
+### 方式二：Cloudflare Pages
+
+仓库已包含 `wrangler.toml`，支持直接部署到 Cloudflare Pages。
+
+**通过 Cloudflare Dashboard（推荐）：**
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages → Create → Pages**
+2. 连接 GitHub 仓库，框架预设选「无 / None」
+3. 构建命令留空，输出目录填 `.`
+4. 点击部署，完成后通过 `https://cf-deploy.pages.dev`（或自定义域名）访问
+
+**通过 wrangler 命令部署：**
+
+```bash
+wrangler pages deploy .
+```
+
+> Cloudflare Pages 的全球 CDN 访问速度通常优于 GitHub Pages，如果主要在国内使用建议选择此方式。
 
 ---
 
 ## 使用前提
 
-此网页是 **[Wrangler-Action](/.github/workflows/deploy.yml)** 的配套工具，需要目标仓库已按照该项目的 README 完成以下配置：
+此网页是 **[cf-wrangler-actions](https://github.com/你的用户名/cf-wrangler-actions)** 的配套工具，需要目标仓库已按照该项目的 README 完成以下配置：
 
 - 已添加 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`GH_WORKFLOW_TOKEN` 三个 Secret
 - 仓库中已存在 `.github/workflows/deploy.yml`
