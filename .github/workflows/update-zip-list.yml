@@ -1,0 +1,121 @@
+name: 📋 更新压缩包选择列表
+
+# ────────────────────────────────────────────────────────────
+# 触发条件：根目录有 zip 文件变更时自动运行，或手动触发
+# 作用：扫描仓库根目录所有 .zip 文件，将文件名写入
+#       deploy.yml 中 zip_file 字段的下拉菜单选项
+#
+# ⚠️  权限说明：
+#   修改 .github/workflows/ 目录下的文件是 GitHub 的硬性限制，
+#   GITHUB_TOKEN 无论设置何种 permissions 都无法完成此操作。
+#   必须使用带 workflow 权限的 Personal Access Token（PAT）。
+#   请在仓库 Settings → Secrets → Actions 中添加：
+#   GH_WORKFLOW_TOKEN = 你的 PAT（需勾选 workflow 权限）
+#   创建 PAT 地址：https://github.com/settings/tokens
+# ────────────────────────────────────────────────────────────
+on:
+  push:
+    paths:
+      - '*.zip'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: '手动触发原因（可选，仅供记录）'
+        required: false
+        default: '手动刷新压缩包列表'
+
+jobs:
+  update-list:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+
+      # ── 步骤 1：检出仓库（使用 PAT 以获得 workflow 文件写权限）──
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_WORKFLOW_TOKEN }}
+
+      # ── 步骤 2：扫描 zip 文件并更新 options 列表 ─────────────
+      - name: 📋 扫描压缩包并更新 deploy.yml
+        id: scan
+        run: |
+          if [ -z "$GH_WORKFLOW_TOKEN" ]; then
+            echo "⚠️  警告：GH_WORKFLOW_TOKEN Secret 未配置"
+            echo "   请按照 README 说明创建 PAT 并添加到仓库 Secrets"
+            echo "   否则后续推送步骤将因权限不足而失败"
+          fi
+
+          # ── 1. 扫描当前仓库根目录的 zip 文件（按 git 提交时间降序）──
+          declare -A seen_map
+          ordered=()
+          while IFS= read -r line; do
+            f=$(echo "$line" | tr -d '\r')
+            if [[ "$f" == *.zip ]] && [[ -f "$f" ]] && [[ -z "${seen_map[$f]+x}" ]]; then
+              seen_map["$f"]=1
+              ordered+=("$f")
+            fi
+          done < <(git log --name-only --format="" -- "*.zip" 2>/dev/null)
+
+          # 兜底：补充尚未被 git log 收录的 zip
+          while IFS= read -r fname; do
+            if [[ -z "${seen_map[$fname]+x}" ]]; then
+              seen_map["$fname"]=1
+              ordered+=("$fname")
+            fi
+          done < <(ls -t *.zip 2>/dev/null)
+
+          echo "📦 当前仓库压缩包（${#ordered[@]} 个）："
+          for f in "${ordered[@]}"; do echo "   - $f"; done
+
+          # ── 2. 构建新 options 条目（10 空格缩进）────────────────
+          NEW_OPTIONS="          - 自动选最新"
+          for f in "${ordered[@]}"; do
+            NEW_OPTIONS="${NEW_OPTIONS}"$'\n'"          - ${f}"
+          done
+
+          # ── 3. 仅替换 zip_file 字段下的 options 块 ──────────────
+          # 用 in_zip 标记精确定位，避免误替换 mode 等其他 options 块
+          awk -v new_items="$NEW_OPTIONS" '
+            /^[[:space:]]*zip_file:/ { in_zip=1 }
+
+            in_zip && /^[[:space:]]*options:/ {
+              print "        options:"
+              print new_items
+              skip=1
+              next
+            }
+
+            skip && /^[[:space:]]*-[[:space:]]/ { next }
+
+            skip { skip=0; in_zip=0 }
+
+            { print }
+          ' .github/workflows/deploy.yml > /tmp/deploy_updated.yml
+
+          # ── 4. 用 diff 比较新旧文件，完全一致则直接退出 ─────────
+          if diff -q .github/workflows/deploy.yml /tmp/deploy_updated.yml > /dev/null 2>&1; then
+            echo "✅ 压缩包列表无变化，无需更新 deploy.yml"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            cp /tmp/deploy_updated.yml .github/workflows/deploy.yml
+            echo "🔄 列表有变化，已更新 deploy.yml"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_WORKFLOW_TOKEN: ${{ secrets.GH_WORKFLOW_TOKEN }}
+
+      # ── 步骤 3：提交更新（仅列表有变化时执行） ──────────────
+      - name: 💾 提交 options 更新
+        if: steps.scan.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .github/workflows/deploy.yml
+          git commit -m "chore: 自动更新压缩包选择列表 [skip ci]"
+          git push "https://x-access-token:${{ secrets.GH_WORKFLOW_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
+          echo "✅ 压缩包选择列表已更新"

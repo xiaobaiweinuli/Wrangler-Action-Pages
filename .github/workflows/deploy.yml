@@ -1,0 +1,272 @@
+name: 🚀 部署到 Cloudflare
+
+# ────────────────────────────────────────────────────────────
+# 触发条件：
+#   1. 推送 zip 文件到仓库根目录时自动触发（静默部署）
+#   2. 手动触发（可选模式、选择压缩包、输入命令、开启调试）
+#
+# 运行模式：
+#   deploy           → 只部署压缩包（push 自动触发也走此逻辑）
+#   wrangler-command → 只执行 wrangler 命令，不部署压缩包
+#   all              → 先执行 wrangler 命令，再部署压缩包
+# ────────────────────────────────────────────────────────────
+on:
+  push:
+    paths:
+      - '*.zip'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - wrangler-command
+          - all
+      zip_file:
+        description: '[deploy/all] 选择压缩包（不选则自动使用最新）'
+        required: false
+        default: '自动选最新'
+        type: choice
+        options:
+          - 自动选最新
+      wrangler_cmd:
+        description: '[wrangler-command/all] 每行一条 wrangler 命令（必须以 wrangler 开头）'
+        required: false
+        default: ''
+        type: string
+      debug_mode:
+        description: '调试模式（显示完整 Wrangler 日志）'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+
+      # ── 步骤 1：检出仓库 ─────────────────────────────────────
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 步骤 2：配置 Node.js ──────────────────────────────────
+      - name: ⚙️ 配置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── 步骤 3：安装 Wrangler CLI（所有模式都需要）────────────
+      - name: 📦 安装 Wrangler CLI
+        run: |
+          npm install -g wrangler > /dev/null 2>&1
+          echo "✅ $(wrangler --version) 安装完成"
+
+      # ── 步骤 4：执行 Wrangler 命令（wrangler-command / all）───
+      # 每行一条命令，必须以 "wrangler " 开头，逐条执行
+      # push 自动触发、deploy 模式时跳过
+      - name: ⚡ 执行 Wrangler 命令
+        if: github.event.inputs.mode == 'wrangler-command' || github.event.inputs.mode == 'all'
+        run: |
+          RAW="${{ github.event.inputs.wrangler_cmd }}"
+
+          if [ -z "$RAW" ]; then
+            echo "❌ 错误：未输入任何命令"
+            exit 1
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ⚡ 执行 Wrangler 命令"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          FAILED=0
+          LINE_NUM=0
+
+          while IFS= read -r line; do
+            # 去除首尾空白
+            line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            # 跳过空行和注释行
+            [ -z "$line" ] && continue
+            [[ "$line" == \#* ]] && continue
+
+            # 安全校验：只允许 wrangler 开头的命令
+            if [[ ! "$line" =~ ^wrangler[[:space:]] ]]; then
+              echo "❌ 命令被拒绝（仅允许 wrangler 命令）：$line"
+              exit 1
+            fi
+
+            LINE_NUM=$((LINE_NUM + 1))
+            echo ""
+            echo "▶ 命令 $LINE_NUM：$line"
+            echo "────────────────────────────────"
+
+            eval "$line"
+            CMD_EXIT=$?
+
+            if [ $CMD_EXIT -ne 0 ]; then
+              echo "❌ 命令 $LINE_NUM 执行失败（退出码：$CMD_EXIT）"
+              FAILED=$((FAILED + 1))
+            else
+              echo "✅ 命令 $LINE_NUM 执行成功"
+            fi
+          done <<< "$RAW"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ 共 $LINE_NUM 条命令，$FAILED 条失败"
+            exit 1
+          else
+            echo "✅ 共 $LINE_NUM 条命令，全部执行成功"
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # ── 步骤 5：确定目标压缩包（deploy / all / push 触发）─────
+      - name: 🔍 确定目标压缩包
+        id: find-zip
+        if: github.event_name == 'push' || github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'all'
+        run: |
+          SELECTED="${{ github.event.inputs.zip_file }}"
+
+          if [ -n "$SELECTED" ] && [ "$SELECTED" != "自动选最新" ]; then
+            if [ ! -f "$SELECTED" ]; then
+              echo "❌ 错误：指定的压缩包 '$SELECTED' 不存在于仓库根目录"
+              exit 1
+            fi
+            ZIP_FILE="$SELECTED"
+            echo "📦 使用指定压缩包：$ZIP_FILE"
+          else
+            # 按 git 提交时间降序，取最新 zip
+            LATEST_ZIP=""
+            declare -A seen_files
+            while IFS= read -r f; do
+              f=$(echo "$f" | tr -d '\r')
+              if [[ "$f" == *.zip ]] && [[ -f "$f" ]] && [[ -z "${seen_files[$f]+x}" ]]; then
+                seen_files["$f"]=1
+                [ -z "$LATEST_ZIP" ] && LATEST_ZIP="$f"
+              fi
+            done < <(git log --name-only --format="" -- "*.zip" 2>/dev/null)
+
+            # 兜底：按文件系统时间排序
+            [ -z "$LATEST_ZIP" ] && LATEST_ZIP=$(ls -t *.zip 2>/dev/null | head -1)
+
+            if [ -z "$LATEST_ZIP" ]; then
+              echo "❌ 错误：仓库根目录下没有找到任何 .zip 文件"
+              exit 1
+            fi
+            ZIP_FILE="$LATEST_ZIP"
+            echo "📦 自动选择最新压缩包：$ZIP_FILE"
+          fi
+
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      # ── 步骤 6：解压压缩包 ────────────────────────────────────
+      - name: 📂 解压压缩包
+        id: extract
+        if: github.event_name == 'push' || github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'all'
+        run: |
+          ZIP_FILE="${{ steps.find-zip.outputs.zip_file }}"
+          EXTRACT_DIR="cf_project_tmp"
+          mkdir -p "$EXTRACT_DIR"
+
+          echo "📂 解压中：$ZIP_FILE"
+          EXTRACT_ERR=$(unzip -o "$ZIP_FILE" -d "$EXTRACT_DIR" 2>&1)
+          EXTRACT_EXIT=$?
+
+          if [ $EXTRACT_EXIT -ne 0 ]; then
+            echo "❌ 错误：解压失败，压缩包可能已损坏"
+            echo "   错误详情：$EXTRACT_ERR"
+            exit 1
+          fi
+          echo "✅ 解压完成"
+
+          # 查找 wrangler.toml（最深不超过 3 层）
+          WRANGLER_TOML=$(find "$EXTRACT_DIR" -name "wrangler.toml" -maxdepth 3 2>/dev/null | head -1)
+          if [ -z "$WRANGLER_TOML" ]; then
+            echo "❌ 错误：解压后未找到 wrangler.toml"
+            echo "   请确认压缩包的根层包含 wrangler.toml 文件"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$WRANGLER_TOML")
+          echo "✅ 找到项目目录：$PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      # ── 步骤 7：安装项目依赖 ──────────────────────────────────
+      # Worker 和 Pages 都可能有依赖，统一处理
+      - name: 📦 安装项目依赖
+        if: github.event_name == 'push' || github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'all'
+        run: |
+          PROJECT_DIR="${{ steps.extract.outputs.project_dir }}"
+
+          if [ -f "$PROJECT_DIR/package.json" ]; then
+            echo "📦 发现 package.json，安装依赖..."
+            cd "$PROJECT_DIR"
+            npm install 2>&1 | tail -5
+            echo "✅ 依赖安装完成"
+          else
+            echo "⏭️  无 package.json，跳过依赖安装"
+          fi
+
+      # ── 步骤 8：构建项目 ──────────────────────────────────────
+      # Worker（TypeScript/Vite/Hono 等）和 Pages 都可能需要构建，统一处理
+      - name: 🔨 构建项目
+        if: github.event_name == 'push' || github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'all'
+        run: |
+          PROJECT_DIR="${{ steps.extract.outputs.project_dir }}"
+          cd "$PROJECT_DIR"
+
+          if [ -f "package.json" ]; then
+            HAS_BUILD=$(node -e "try{var p=require('./package.json');console.log(p.scripts&&p.scripts.build?'yes':'no')}catch(e){console.log('no')}")
+            if [ "$HAS_BUILD" = "yes" ]; then
+              echo "🔨 执行 npm run build..."
+              npm run build
+              echo "✅ 构建完成"
+            else
+              echo "⏭️  无 build script，跳过构建"
+            fi
+          else
+            echo "⏭️  无 package.json，跳过构建"
+          fi
+
+      # ── 步骤 9：部署（调试模式）──────────────────────────────
+      # wrangler deploy 自动读取 wrangler.toml，无论 Worker 还是 Pages 统一命令
+      - name: 🚀 部署到 Cloudflare（调试模式）
+        if: (github.event_name == 'push' || github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'all') && github.event.inputs.debug_mode == 'true'
+        run: |
+          cd "${{ steps.extract.outputs.project_dir }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  🐛 调试模式已开启，完整日志如下"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # ── 步骤 10：部署（静默模式）─────────────────────────────
+      # 所有 Wrangler 输出重定向到 /dev/null，不暴露任何信息
+      - name: 🚀 部署到 Cloudflare（静默模式）
+        if: (github.event_name == 'push' || github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'all') && github.event.inputs.debug_mode != 'true'
+        run: |
+          cd "${{ steps.extract.outputs.project_dir }}"
+          wrangler deploy > /dev/null 2>&1
+          DEPLOY_EXIT=$?
+
+          if [ $DEPLOY_EXIT -eq 0 ]; then
+            echo "✅ 部署成功"
+          else
+            echo "❌ 部署失败（退出码：$DEPLOY_EXIT）"
+            echo "💡 提示：勾选「调试模式」重新运行可查看详细错误日志"
+            exit $DEPLOY_EXIT
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

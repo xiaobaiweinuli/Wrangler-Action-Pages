@@ -1,0 +1,1811 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CF Deploy — Cloudflare 部署控制台</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+
+    /* ── 主题变量 ─────────────────────────────────────────── */
+    [data-theme="dark"] {
+      --bg:          #080b12;
+      --bg-card:     #0e1320;
+      --bg-input:    #141928;
+      --bg-hover:    #1a2035;
+      --border:      #1e2840;
+      --border-muted:#141928;
+      --text:        #dde4f0;
+      --text-muted:  #5a6b8a;
+      --text-dim:    #3a4a66;
+      --accent:      #F6821F;
+      --accent-glow: rgba(246,130,31,0.25);
+      --accent-dim:  rgba(246,130,31,0.12);
+      --accent-hover:#ff9a3a;
+      --success:     #4ade80;
+      --success-dim: rgba(74,222,128,0.12);
+      --error:       #f87171;
+      --error-dim:   rgba(248,113,113,0.12);
+      --warning:     #fbbf24;
+      --warning-dim: rgba(251,191,36,0.12);
+      --info:        #60a5fa;
+      --info-dim:    rgba(96,165,250,0.12);
+      --shadow:      0 16px 48px rgba(0,0,0,0.6);
+      --shadow-sm:   0 4px 16px rgba(0,0,0,0.4);
+      --dot-color:   rgba(30,40,64,0.8);
+    }
+    [data-theme="light"] {
+      --bg:          #f0f4fa;
+      --bg-card:     #ffffff;
+      --bg-input:    #f7f9fd;
+      --bg-hover:    #eef2f9;
+      --border:      #dde3ef;
+      --border-muted:#eef2f9;
+      --text:        #1a2035;
+      --text-muted:  #6474a0;
+      --text-dim:    #a0aec0;
+      --accent:      #e07310;
+      --accent-glow: rgba(224,115,16,0.15);
+      --accent-dim:  rgba(224,115,16,0.08);
+      --accent-hover:#c96000;
+      --success:     #16a34a;
+      --success-dim: rgba(22,163,74,0.1);
+      --error:       #dc2626;
+      --error-dim:   rgba(220,38,38,0.1);
+      --warning:     #d97706;
+      --warning-dim: rgba(217,119,6,0.1);
+      --info:        #2563eb;
+      --info-dim:    rgba(37,99,235,0.1);
+      --shadow:      0 16px 48px rgba(0,0,0,0.08);
+      --shadow-sm:   0 4px 16px rgba(0,0,0,0.06);
+      --dot-color:   rgba(180,192,220,0.5);
+    }
+
+    /* ── 基础 ────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      transition: background .3s, color .3s;
+    }
+
+    body {
+      min-height: 100vh;
+      background-image: radial-gradient(var(--dot-color) 1px, transparent 1px);
+      background-size: 22px 22px;
+      background-attachment: fixed;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    input, textarea, select, button { font-family: inherit; }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 60px;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.3px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px var(--accent-glow);
+      font-size: 16px;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .repo-badge {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 13px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .repo-badge.visible { display: flex; }
+    .repo-badge .dot {
+      width: 7px; height: 7px;
+      background: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--success);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+
+    /* ── Buttons ─────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .2s;
+      white-space: nowrap;
+    }
+
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      box-shadow: 0 0 28px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--bg-input);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--bg-hover);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      padding: 6px 10px;
+    }
+    .btn-ghost:hover { color: var(--text); background: var(--bg-hover); border-radius: 6px; }
+
+    .btn-danger {
+      background: var(--error-dim);
+      color: var(--error);
+      border: 1px solid transparent;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: var(--error);
+      color: #fff;
+    }
+
+    .btn-sm { padding: 5px 11px; font-size: 13px; }
+    .btn-icon { padding: 7px; border-radius: 8px; }
+
+    /* ── Theme Toggle ────────────────────────────────────── */
+    .theme-toggle {
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .2s;
+      font-size: 17px;
+    }
+    .theme-toggle:hover { border-color: var(--accent); }
+
+    /* ── Layout ─────────────────────────────────────────── */
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    /* ── Card ────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow-sm);
+      transition: background .3s, border-color .3s;
+    }
+
+    .card-header {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .card-body { padding: 22px; }
+
+    /* ── Auth Panel ──────────────────────────────────────── */
+    #auth-panel { margin-top: 48px; }
+
+    .auth-hero {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    .auth-hero h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+    }
+
+    .auth-hero h1 span { color: var(--accent); }
+
+    .auth-hero p {
+      color: var(--text-muted);
+      font-size: 15px;
+      max-width: 420px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    .auth-form { display: flex; flex-direction: column; gap: 14px; }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+
+    .form-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: .3px;
+    }
+
+    .input-wrap { position: relative; }
+
+    .form-input {
+      width: 100%;
+      padding: 11px 14px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-size: 14px;
+      transition: border-color .2s, box-shadow .2s;
+      outline: none;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    .form-input::placeholder { color: var(--text-dim); }
+
+    .input-with-btn {
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-with-btn .form-input { flex: 1; }
+
+    /* Repo history dropdown */
+    .repo-dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      box-shadow: var(--shadow);
+      z-index: 50;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .repo-dropdown.open { display: block; }
+
+    .repo-dropdown-item {
+      padding: 10px 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      transition: background .15s;
+    }
+
+    .repo-dropdown-item:hover { background: var(--bg-hover); }
+
+    .repo-dropdown-item .remove-repo {
+      color: var(--text-dim);
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+
+    .repo-dropdown-item .remove-repo:hover { color: var(--error); }
+
+    .repo-dropdown-empty {
+      padding: 14px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .auth-footer {
+      margin-top: 16px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+
+    /* ── Main Panel ──────────────────────────────────────── */
+    #main-panel { display: none; }
+    #main-panel.visible { display: block; }
+
+    /* ── Tabs ────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 5px;
+      background: var(--bg-input);
+      border-radius: 11px;
+      margin-bottom: 20px;
+      border: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 9px 14px;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+
+    .tab-btn.active {
+      background: var(--bg-card);
+      color: var(--accent);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Drop Zone ───────────────────────────────────────── */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .2s;
+      background: var(--bg-input);
+      position: relative;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .drop-zone-icon { font-size: 36px; margin-bottom: 14px; }
+
+    .drop-zone-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .drop-zone-sub {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    .drop-zone-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ── File Preview ────────────────────────────────────── */
+    #file-preview {
+      display: none;
+      margin-top: 16px;
+      padding: 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .file-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+    }
+
+    .file-icon { font-size: 22px; }
+
+    .file-meta { display: flex; flex-direction: column; gap: 2px; }
+
+    .file-name-original {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .file-size {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .file-size.warning { color: var(--warning); }
+
+    .deploy-name-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .deploy-name-row label {
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    .deploy-name-row .form-input {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+    }
+
+    .deploy-name-row .zip-suffix {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    /* ── Progress ────────────────────────────────────────── */
+    #progress-panel {
+      display: none;
+      margin-top: 16px;
+    }
+
+    .progress-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .progress-step.active { color: var(--text); }
+    .progress-step.done { color: var(--success); }
+    .progress-step.error { color: var(--error); }
+
+    .step-icon { width: 22px; text-align: center; font-size: 16px; }
+
+    .progress-bar-wrap {
+      height: 4px;
+      background: var(--bg-input);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width .3s;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    /* ── Versions List ───────────────────────────────────── */
+    .version-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .version-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      transition: border-color .2s;
+      gap: 12px;
+    }
+
+    .version-item:hover { border-color: var(--border-muted); }
+
+    .version-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .version-icon { font-size: 20px; flex-shrink: 0; }
+
+    .version-meta { flex: 1; min-width: 0; }
+
+    .version-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .version-detail {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .version-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    /* ── Commands Tab ────────────────────────────────────── */
+    .cmd-mode-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .mode-chip {
+      padding: 7px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-input);
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .2s;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .mode-chip:hover { border-color: var(--accent); color: var(--accent); }
+    .mode-chip.active {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .form-textarea {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      resize: vertical;
+      min-height: 120px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      line-height: 1.7;
+    }
+
+    .form-textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    .form-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.6;
+    }
+
+    /* ── Zip file select for commands ────────────────────── */
+    #cmd-zip-row { display: none; margin-bottom: 16px; }
+    #cmd-zip-row.visible { display: block; }
+
+    /* ── Runs Panel ──────────────────────────────────────── */
+    #runs-panel { margin-top: 24px; }
+
+    .run-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-muted);
+      font-size: 13px;
+      transition: background .15s;
+    }
+
+    .run-item:last-child { border-bottom: none; }
+    .run-item:hover { background: var(--bg-hover); }
+
+    .run-status {
+      width: 80px;
+      flex-shrink: 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .3px;
+    }
+
+    .badge-success { background: var(--success-dim); color: var(--success); }
+    .badge-error   { background: var(--error-dim);   color: var(--error);   }
+    .badge-warning { background: var(--warning-dim); color: var(--warning); }
+    .badge-info    { background: var(--info-dim);    color: var(--info);    }
+    .badge-muted   { background: var(--bg-input);    color: var(--text-muted); }
+
+    .run-name { flex: 1; min-width: 0; }
+
+    .run-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+    }
+
+    .run-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .run-time {
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .spinning { animation: spin 1s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ───────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .toast {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      font-size: 14px;
+      max-width: 360px;
+      animation: slideUp .25s ease;
+      transition: opacity .3s;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error   { border-left: 3px solid var(--error);   }
+    .toast.info    { border-left: 3px solid var(--info);    }
+
+    /* ── Confirm Modal ───────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      z-index: 999;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: var(--shadow);
+      animation: scaleIn .2s ease;
+    }
+
+    @keyframes scaleIn {
+      from { transform: scale(.9); opacity: 0; }
+      to   { transform: scale(1);  opacity: 1; }
+    }
+
+    .modal h3 { font-size: 17px; margin-bottom: 10px; }
+    .modal p  { font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-bottom: 22px; }
+
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+    /* ── Empty State ─────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon { font-size: 36px; margin-bottom: 12px; }
+    .empty-state p { font-size: 14px; line-height: 1.6; }
+
+    /* ── Disconnect btn ──────────────────────────────────── */
+    #disconnect-btn { display: none; }
+    #disconnect-btn.visible { display: flex; }
+
+    /* ── Misc ────────────────────────────────────────────── */
+    .section-gap { margin-top: 24px; }
+
+    .text-muted  { color: var(--text-muted); }
+    .text-accent { color: var(--accent);     }
+    .mono        { font-family: 'JetBrains Mono', monospace; }
+
+    .loading-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 28px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* ── Mobile ──────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .container { padding: 20px 14px 48px; }
+      #auth-panel { margin-top: 28px; }
+      .auth-hero h1 { font-size: 26px; }
+      .tab-btn span.tab-label { display: none; }
+      .version-actions { flex-direction: column; gap: 6px; }
+      header { padding: 0 16px; }
+      .repo-badge { display: none !important; }
+      .cmd-mode-row { gap: 6px; }
+      .mode-chip { font-size: 12px; padding: 6px 10px; }
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">☁</div>
+      CF <span>Deploy</span>
+    </div>
+    <div class="header-right">
+      <div class="repo-badge" id="repo-badge">
+        <div class="dot"></div>
+        <span id="repo-badge-text">—</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="disconnect-btn" onclick="disconnect()">断开连接</button>
+      <div class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="切换主题">🌙</div>
+    </div>
+  </header>
+
+  <!-- Toast -->
+  <div id="toast-container"></div>
+
+  <!-- Confirm Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <h3 id="modal-title">确认操作</h3>
+      <p id="modal-body">你确定要执行此操作吗？</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-danger" id="modal-confirm-btn">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="folder-input" webkitdirectory multiple style="display:none">
+  <input type="file" id="zip-input" accept=".zip" style="display:none">
+
+  <div class="container">
+
+    <!-- ── Auth Panel ──────────────────────────── -->
+    <div id="auth-panel">
+      <div class="auth-hero">
+        <h1>Cloudflare <span>部署控制台</span></h1>
+        <p>通过 GitHub Actions 将你的 Cloudflare Worker / Pages 项目一键部署，无需命令行。</p>
+      </div>
+
+      <div class="card" style="max-width:460px;margin:0 auto;">
+        <div class="card-header">
+          <div class="card-title">🔐 连接 GitHub 仓库</div>
+        </div>
+        <div class="card-body">
+          <form id="auth-form" autocomplete="on" class="auth-form">
+
+            <div class="form-group">
+              <label class="form-label" for="repo-input">仓库地址</label>
+              <div class="input-wrap">
+                <div class="input-with-btn">
+                  <input
+                    type="text"
+                    id="repo-input"
+                    name="username"
+                    autocomplete="username"
+                    class="form-input mono"
+                    placeholder="owner/repo-name"
+                    required
+                  >
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="fetchGitHubRepos()" id="fetch-repos-btn" title="从 GitHub 获取仓库列表">
+                    <span>获取列表</span>
+                  </button>
+                </div>
+                <div class="repo-dropdown" id="repo-dropdown"></div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="pat-input">
+                GitHub PAT
+                <a href="https://github.com/settings/tokens" target="_blank" style="margin-left:6px;font-size:11px;">创建 Token →</a>
+              </label>
+              <input
+                type="password"
+                id="pat-input"
+                name="password"
+                autocomplete="current-password"
+                class="form-input mono"
+                placeholder="ghp_xxxxxxxxxxxx"
+                required
+              >
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="connect-btn" style="width:100%;justify-content:center;margin-top:4px;">
+              连接
+            </button>
+
+          </form>
+
+          <div class="auth-footer">
+            PAT 需要 <strong>repo</strong> + <strong>workflow</strong> 权限<br>
+            凭据由浏览器密码管理器保存，不存入 localStorage
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Main Panel ──────────────────────────── -->
+    <div id="main-panel">
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('deploy')" id="tab-btn-deploy">
+          🚀 <span class="tab-label">部署</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab('versions')" id="tab-btn-versions">
+          📦 <span class="tab-label">版本管理</span>
+        </button>
+        <button class="tab-btn" onclick="switchTab('commands')" id="tab-btn-commands">
+          ⚡ <span class="tab-label">命令执行</span>
+        </button>
+      </div>
+
+      <!-- 部署 Tab -->
+      <div class="tab-content active" id="tab-deploy">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🚀 部署项目</div>
+          </div>
+          <div class="card-body">
+
+            <!-- Drop Zone -->
+            <div class="drop-zone" id="drop-zone">
+              <div class="drop-zone-icon">📂</div>
+              <div class="drop-zone-title">选择项目文件夹或 ZIP 文件</div>
+              <div class="drop-zone-sub">拖放 ZIP 文件到此处，或使用下方按钮选择</div>
+              <div class="drop-zone-actions">
+                <button class="btn btn-secondary" onclick="document.getElementById('folder-input').click()">
+                  📁 选择文件夹
+                </button>
+                <button class="btn btn-secondary" onclick="document.getElementById('zip-input').click()">
+                  🗜️ 选择 ZIP 文件
+                </button>
+              </div>
+            </div>
+
+            <!-- File Preview -->
+            <div id="file-preview">
+              <div class="file-preview-header">
+                <div class="file-info">
+                  <div class="file-icon" id="file-icon">🗜️</div>
+                  <div class="file-meta">
+                    <div class="file-name-original" id="file-original-name">—</div>
+                    <div class="file-size" id="file-size">—</div>
+                  </div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="clearFile()">✕ 清除</button>
+              </div>
+
+              <div class="deploy-name-row">
+                <label>上传为</label>
+                <input type="text" class="form-input" id="deploy-name-input" placeholder="文件名">
+                <span class="zip-suffix">.zip</span>
+              </div>
+
+              <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-primary" id="upload-btn" onclick="startUpload()">
+                  ☁ 上传并部署
+                </button>
+                <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer;">
+                  <input type="checkbox" id="debug-mode-check" style="accent-color:var(--accent);">
+                  调试模式
+                </label>
+              </div>
+            </div>
+
+            <!-- Progress -->
+            <div id="progress-panel">
+              <div class="progress-step" id="step-pack">
+                <div class="step-icon">⏳</div>
+                <div>
+                  <div id="step-pack-text">准备打包...</div>
+                  <div class="progress-bar-wrap" style="width:200px;margin-top:6px;">
+                    <div class="progress-bar" id="pack-progress-bar" style="width:0%"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="progress-step" id="step-upload">
+                <div class="step-icon">⏸</div>
+                <div id="step-upload-text">等待上传...</div>
+              </div>
+              <div class="progress-step" id="step-trigger">
+                <div class="step-icon">⏸</div>
+                <div id="step-trigger-text">等待触发部署...</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- 版本管理 Tab -->
+      <div class="tab-content" id="tab-versions">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📦 版本管理</div>
+            <button class="btn btn-secondary btn-sm" onclick="loadVersions()">🔄 刷新</button>
+          </div>
+          <div class="card-body" style="padding:0;">
+            <div id="versions-list">
+              <div class="loading-row">
+                <span class="spinning">⟳</span> 加载中...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 命令执行 Tab -->
+      <div class="tab-content" id="tab-commands">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚡ 执行 Wrangler 命令</div>
+          </div>
+          <div class="card-body">
+
+            <!-- Mode chips -->
+            <div style="margin-bottom:12px;">
+              <div class="form-label" style="margin-bottom:8px;">运行模式</div>
+              <div class="cmd-mode-row">
+                <div class="mode-chip active" data-mode="wrangler-command" onclick="selectMode(this)">wrangler-command</div>
+                <div class="mode-chip" data-mode="deploy" onclick="selectMode(this)">deploy</div>
+                <div class="mode-chip" data-mode="all" onclick="selectMode(this)">all</div>
+              </div>
+            </div>
+
+            <!-- ZIP select (for deploy / all mode) -->
+            <div id="cmd-zip-row">
+              <div class="form-label" style="margin-bottom:6px;">选择压缩包</div>
+              <select id="cmd-zip-select" class="form-input mono" style="font-size:13px;">
+                <option value="">自动选最新</option>
+              </select>
+            </div>
+
+            <!-- Commands textarea -->
+            <div id="cmd-textarea-row" style="margin-bottom:14px;">
+              <div class="form-label" style="margin-bottom:6px;">Wrangler 命令（每行一条，必须以 wrangler 开头）</div>
+              <textarea
+                id="cmd-input"
+                class="form-textarea"
+                placeholder="wrangler d1 create my-db&#10;wrangler vectorize create email-vectors --dimensions=768"
+              ></textarea>
+              <div class="form-hint">空行和 # 开头的注释行会自动跳过。命令在仓库根目录执行。</div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <button class="btn btn-primary" onclick="triggerWorkflow()">▶ 执行</button>
+              <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer;">
+                <input type="checkbox" id="cmd-debug-check" style="accent-color:var(--accent);">
+                调试模式
+              </label>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Runs Panel -->
+      <div id="runs-panel" class="section-gap">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📋 最近运行记录</div>
+            <button class="btn btn-ghost btn-sm" onclick="loadRuns()">🔄</button>
+          </div>
+          <div id="runs-list" style="padding:0;">
+            <div class="loading-row">
+              <span class="spinning">⟳</span> 加载中...
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main-panel -->
+  </div><!-- /container -->
+
+  <script>
+    // ═══════════════════════════════════════════════
+    // 状态
+    // ═══════════════════════════════════════════════
+    const state = {
+      pat: '',
+      repo: '',           // "owner/repo"
+      defaultBranch: 'main',
+      connected: false,
+      pendingBlob: null,  // 待上传的 zip Blob
+      pollTimer: null,
+      modalResolve: null,
+    };
+
+    // ═══════════════════════════════════════════════
+    // GitHub API 封装
+    // ═══════════════════════════════════════════════
+    async function gh(endpoint, options = {}) {
+      const res = await fetch('https://api.github.com' + endpoint, {
+        ...options,
+        headers: {
+          'Authorization': 'Bearer ' + state.pat,
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || ('HTTP ' + res.status));
+      }
+      if (res.status === 204) return null;
+      return res.json();
+    }
+
+    // ═══════════════════════════════════════════════
+    // Repo 历史（localStorage）
+    // ═══════════════════════════════════════════════
+    function getRepoHistory() {
+      try { return JSON.parse(localStorage.getItem('cf_deploy_repos') || '[]'); }
+      catch { return []; }
+    }
+
+    function saveRepoHistory(repos) {
+      localStorage.setItem('cf_deploy_repos', JSON.stringify(repos));
+    }
+
+    function addRepoToHistory(repo) {
+      const list = getRepoHistory().filter(r => r !== repo);
+      list.unshift(repo);
+      saveRepoHistory(list.slice(0, 10));
+    }
+
+    function removeRepoFromHistory(repo) {
+      saveRepoHistory(getRepoHistory().filter(r => r !== repo));
+      renderRepoDropdown();
+    }
+
+    // ═══════════════════════════════════════════════
+    // Repo Dropdown
+    // ═══════════════════════════════════════════════
+    const repoInput = document.getElementById('repo-input');
+    const repoDropdown = document.getElementById('repo-dropdown');
+
+    repoInput.addEventListener('focus', renderRepoDropdown);
+    repoInput.addEventListener('input', renderRepoDropdown);
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.input-wrap')) repoDropdown.classList.remove('open');
+    });
+
+    function renderRepoDropdown() {
+      const history = getRepoHistory();
+      const q = repoInput.value.toLowerCase();
+      const filtered = history.filter(r => r.toLowerCase().includes(q));
+
+      if (!filtered.length) {
+        repoDropdown.innerHTML = '<div class="repo-dropdown-empty">暂无历史记录</div>';
+        repoDropdown.classList.toggle('open', history.length > 0);
+        return;
+      }
+
+      repoDropdown.innerHTML = filtered.map(r => `
+        <div class="repo-dropdown-item" onclick="selectRepo('${r}')">
+          <span>${r}</span>
+          <span class="remove-repo" onclick="event.stopPropagation();removeRepoFromHistory('${r}')">×</span>
+        </div>
+      `).join('');
+      repoDropdown.classList.add('open');
+    }
+
+    function selectRepo(repo) {
+      repoInput.value = repo;
+      repoDropdown.classList.remove('open');
+    }
+
+    // ═══════════════════════════════════════════════
+    // 从 GitHub API 获取仓库列表
+    // ═══════════════════════════════════════════════
+    async function fetchGitHubRepos() {
+      const pat = document.getElementById('pat-input').value.trim();
+      if (!pat) { toast('请先输入 PAT', 'error'); return; }
+
+      const btn = document.getElementById('fetch-repos-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinning">⟳</span>';
+
+      try {
+        const tempPat = pat;
+        const res = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator', {
+          headers: { 'Authorization': 'Bearer ' + tempPat, 'Accept': 'application/vnd.github+json' }
+        });
+        if (!res.ok) throw new Error('请检查 PAT 权限');
+        const repos = await res.json();
+
+        repoDropdown.innerHTML = repos.map(r => `
+          <div class="repo-dropdown-item" onclick="selectRepo('${r.full_name}')">
+            <span>${r.full_name}</span>
+            <span style="font-size:11px;color:var(--text-dim)">${r.private ? '🔒' : '🌐'}</span>
+          </div>
+        `).join('');
+        repoDropdown.classList.add('open');
+        toast('已获取 ' + repos.length + ' 个仓库', 'success');
+      } catch (e) {
+        toast('获取失败：' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>获取列表</span>';
+      }
+    }
+
+    // ═══════════════════════════════════════════════
+    // 连接 / 断开
+    // ═══════════════════════════════════════════════
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await connect();
+    });
+
+    async function connect() {
+      const repo = repoInput.value.trim();
+      const pat  = document.getElementById('pat-input').value.trim();
+      if (!repo || !pat) { toast('请填写仓库地址和 PAT', 'error'); return; }
+
+      const btn = document.getElementById('connect-btn');
+      btn.disabled = true;
+      btn.textContent = '连接中...';
+
+      try {
+        state.pat  = pat;
+        state.repo = repo;
+
+        // 验证 PAT + 读取仓库信息
+        const repoInfo = await gh('/repos/' + repo);
+        state.defaultBranch = repoInfo.default_branch || 'main';
+
+        // 尝试保存凭据（Credential Management API）
+        if (window.PasswordCredential) {
+          try {
+            const cred = new PasswordCredential({ id: repo, password: pat, name: repo });
+            await navigator.credentials.store(cred);
+          } catch (_) {}
+        }
+
+        addRepoToHistory(repo);
+        state.connected = true;
+
+        // 更新 UI
+        document.getElementById('auth-panel').style.display = 'none';
+        document.getElementById('main-panel').classList.add('visible');
+        document.getElementById('repo-badge').classList.add('visible');
+        document.getElementById('repo-badge-text').textContent = repo;
+        document.getElementById('disconnect-btn').classList.add('visible');
+
+        toast('已连接到 ' + repo, 'success');
+        loadVersions();
+        loadRuns();
+        startPoll();
+
+      } catch (e) {
+        toast('连接失败：' + e.message, 'error');
+        state.pat = state.repo = '';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '连接';
+      }
+    }
+
+    function disconnect() {
+      clearInterval(state.pollTimer);
+      state.pat = state.repo = '';
+      state.connected = false;
+      state.pendingBlob = null;
+
+      document.getElementById('auth-panel').style.display = 'block';
+      document.getElementById('main-panel').classList.remove('visible');
+      document.getElementById('repo-badge').classList.remove('visible');
+      document.getElementById('disconnect-btn').classList.remove('visible');
+      document.getElementById('pat-input').value = '';
+      clearFile();
+      toast('已断开连接', 'info');
+    }
+
+    // ═══════════════════════════════════════════════
+    // 文件选择 & 拖放
+    // ═══════════════════════════════════════════════
+    document.getElementById('folder-input').addEventListener('change', (e) => {
+      handleFolderFiles(e.target.files);
+    });
+
+    document.getElementById('zip-input').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) handleZipFile(file);
+    });
+
+    const dropZone = document.getElementById('drop-zone');
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const files = e.dataTransfer.files;
+      if (!files.length) return;
+
+      const file = files[0];
+      if (file.name.endsWith('.zip')) {
+        handleZipFile(file);
+      } else {
+        toast('请拖放 .zip 文件（文件夹请使用「选择文件夹」按钮）', 'error');
+      }
+    });
+
+    async function handleFolderFiles(fileList) {
+      if (!fileList.length) return;
+      const folderName = fileList[0].webkitRelativePath.split('/')[0] || 'project';
+      setDeployNameInput(folderName);
+      document.getElementById('file-original-name').textContent = '文件夹：' + folderName + '（' + fileList.length + ' 个文件）';
+      document.getElementById('file-icon').textContent = '📁';
+      document.getElementById('file-size').textContent = '打包后显示大小';
+      showFilePreview();
+      state.pendingBlob = { type: 'folder', files: fileList };
+    }
+
+    function handleZipFile(file) {
+      const name = file.name.replace(/\\.zip$/i, '');
+      setDeployNameInput(name);
+      document.getElementById('file-original-name').textContent = file.name;
+      document.getElementById('file-icon').textContent = '🗜️';
+      document.getElementById('file-size').textContent = formatSize(file.size);
+      showFilePreview();
+      state.pendingBlob = { type: 'zip', file };
+    }
+
+    function setDeployNameInput(name) {
+      const clean = name.replace(/[\\s]+/g, '-').replace(/[^\\w\\u4e00-\\u9fa5.\\-]/g, '');
+      document.getElementById('deploy-name-input').value = clean;
+    }
+
+    function showFilePreview() {
+      document.getElementById('file-preview').style.display = 'block';
+      document.getElementById('progress-panel').style.display = 'none';
+    }
+
+    function clearFile() {
+      state.pendingBlob = null;
+      document.getElementById('file-preview').style.display = 'none';
+      document.getElementById('progress-panel').style.display = 'none';
+      document.getElementById('folder-input').value = '';
+      document.getElementById('zip-input').value = '';
+    }
+
+    // ═══════════════════════════════════════════════
+    // 上传 & 部署
+    // ═══════════════════════════════════════════════
+    async function startUpload() {
+      if (!state.pendingBlob) { toast('请先选择文件', 'error'); return; }
+
+      const rawName = document.getElementById('deploy-name-input').value.trim();
+      if (!rawName) { toast('请输入文件名', 'error'); return; }
+      const filename = rawName.replace(/\\.zip$/i, '') + '.zip';
+
+      const uploadBtn = document.getElementById('upload-btn');
+      uploadBtn.disabled = true;
+
+      document.getElementById('progress-panel').style.display = 'block';
+      setStep('pack', 'active', '⏳', '准备中...');
+      setStep('upload', 'waiting', '⏸', '等待上传...');
+      setStep('trigger', 'waiting', '⏸', '等待触发部署...');
+
+      try {
+        let zipBlob;
+
+        // 步骤 1：打包
+        if (state.pendingBlob.type === 'folder') {
+          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包文件夹中...');
+          zipBlob = await packFolder(state.pendingBlob.files);
+          document.getElementById('file-size').textContent = formatSize(zipBlob.size);
+        } else {
+          zipBlob = state.pendingBlob.file;
+          setStep('pack', 'done', '✅', '已选择 ZIP 文件（' + formatSize(zipBlob.size) + '）');
+          setPackProgress(100);
+        }
+
+        if (zipBlob.size > 95 * 1024 * 1024) {
+          toast('文件超过 95MB，GitHub API 限制为 100MB', 'error');
+          setStep('pack', 'error', '❌', '文件过大');
+          uploadBtn.disabled = false;
+          return;
+        }
+
+        setStep('pack', 'done', '✅', '打包完成（' + formatSize(zipBlob.size) + '）');
+        setPackProgress(100);
+
+        // 步骤 2：上传
+        setStep('upload', 'active', '<span class="spinning">⟳</span>', '上传到 GitHub...');
+        await uploadToGitHub(zipBlob, filename);
+        setStep('upload', 'done', '✅', '已上传：' + filename);
+
+        // 步骤 3：触发（push 会自动触发，此步仅提示）
+        setStep('trigger', 'done', '✅', '部署 Action 已自动触发');
+        toast('🎉 ' + filename + ' 上传成功，部署中...', 'success');
+
+        clearFile();
+        setTimeout(() => { loadRuns(); loadVersions(); }, 2000);
+
+      } catch (e) {
+        toast('失败：' + e.message, 'error');
+        setStep('upload', 'error', '❌', '上传失败：' + e.message);
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    async function packFolder(fileList) {
+      const zip = new JSZip();
+      for (const file of fileList) {
+        const buf = await file.arrayBuffer();
+        zip.file(file.webkitRelativePath, buf);
+      }
+      return zip.generateAsync(
+        { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+        (meta) => {
+          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包中 ' + Math.round(meta.percent) + '%...');
+          setPackProgress(meta.percent);
+        }
+      );
+    }
+
+    async function uploadToGitHub(blob, filename) {
+      const base64 = await blobToBase64(blob);
+
+      // 查询是否已存在（获取 sha）
+      let sha;
+      try {
+        const existing = await gh('/repos/' + state.repo + '/contents/' + filename);
+        sha = existing.sha;
+      } catch (_) {}
+
+      const body = {
+        message: 'deploy: upload ' + filename,
+        content: base64,
+        branch: state.defaultBranch,
+      };
+      if (sha) body.sha = sha;
+
+      await gh('/repos/' + state.repo + '/contents/' + filename, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function setStep(id, state, icon, text) {
+      const el = document.getElementById('step-' + id);
+      el.className = 'progress-step ' + state;
+      el.querySelector('.step-icon').innerHTML = icon;
+      el.querySelector('div:last-child').textContent = text;
+    }
+
+    function setPackProgress(pct) {
+      document.getElementById('pack-progress-bar').style.width = pct + '%';
+    }
+
+    // ═══════════════════════════════════════════════
+    // 版本管理
+    // ═══════════════════════════════════════════════
+    async function loadVersions() {
+      const el = document.getElementById('versions-list');
+      el.innerHTML = '<div class="loading-row"><span class="spinning">⟳</span> 加载中...</div>';
+
+      try {
+        const contents = await gh('/repos/' + state.repo + '/contents/');
+        const zips = contents.filter(f => f.name.endsWith('.zip')).sort((a, b) => a.name.localeCompare(b.name));
+
+        // 同步更新命令 Tab 的下拉框
+        updateCmdZipSelect(zips);
+
+        if (!zips.length) {
+          el.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">📭</div>
+              <p>仓库根目录暂无 .zip 文件<br>在「部署」标签上传你的第一个项目</p>
+            </div>`;
+          return;
+        }
+
+        el.innerHTML = '<div class="version-list" style="padding:12px;">' +
+          zips.map(f => `
+            <div class="version-item" id="ver-${f.sha.substring(0,8)}">
+              <div class="version-info">
+                <div class="version-icon">🗜️</div>
+                <div class="version-meta">
+                  <div class="version-name">${f.name}</div>
+                  <div class="version-detail">${formatSize(f.size)}</div>
+                </div>
+              </div>
+              <div class="version-actions">
+                <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}')">🚀 部署</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑</button>
+              </div>
+            </div>
+          `).join('') +
+        '</div>';
+
+      } catch (e) {
+        el.innerHTML = '<div class="empty-state"><p>加载失败：' + e.message + '</p></div>';
+      }
+    }
+
+    function updateCmdZipSelect(zips) {
+      const sel = document.getElementById('cmd-zip-select');
+      sel.innerHTML = '<option value="">自动选最新</option>' +
+        zips.map(z => `<option value="${z.name}">${z.name}</option>`).join('');
+    }
+
+    async function deployVersion(filename) {
+      const debug = false;
+      await dispatchWorkflow({ mode: 'deploy', zip_file: filename, debug_mode: String(debug) });
+      toast('已触发部署：' + filename, 'success');
+      setTimeout(loadRuns, 1500);
+    }
+
+    async function deleteVersion(filename, sha) {
+      const ok = await confirm('确认删除', '删除 ' + filename + '？此操作不可恢复。');
+      if (!ok) return;
+
+      try {
+        await gh('/repos/' + state.repo + '/contents/' + filename, {
+          method: 'DELETE',
+          body: JSON.stringify({
+            message: 'chore: delete ' + filename,
+            sha,
+            branch: state.defaultBranch,
+          }),
+        });
+        toast('已删除 ' + filename, 'success');
+        loadVersions();
+      } catch (e) {
+        toast('删除失败：' + e.message, 'error');
+      }
+    }
+
+    // ═══════════════════════════════════════════════
+    // 命令执行
+    // ═══════════════════════════════════════════════
+    let currentMode = 'wrangler-command';
+
+    function selectMode(el) {
+      document.querySelectorAll('.mode-chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      currentMode = el.dataset.mode;
+
+      const showZip = currentMode === 'deploy' || currentMode === 'all';
+      const showCmd = currentMode === 'wrangler-command' || currentMode === 'all';
+      document.getElementById('cmd-zip-row').classList.toggle('visible', showZip);
+      document.getElementById('cmd-textarea-row').style.display = showCmd ? 'block' : 'none';
+    }
+
+    async function triggerWorkflow() {
+      const cmd   = document.getElementById('cmd-input').value.trim();
+      const zip   = document.getElementById('cmd-zip-select').value;
+      const debug = document.getElementById('cmd-debug-check').checked;
+
+      if ((currentMode === 'wrangler-command' || currentMode === 'all') && !cmd) {
+        toast('请输入 wrangler 命令', 'error'); return;
+      }
+
+      const inputs = {
+        mode: currentMode,
+        debug_mode: String(debug),
+      };
+
+      if (currentMode !== 'wrangler-command') {
+        inputs.zip_file = zip || '自动选最新';
+      }
+
+      if (currentMode !== 'deploy') {
+        inputs.wrangler_cmd = cmd;
+      }
+
+      try {
+        await dispatchWorkflow(inputs);
+        toast('✅ 已触发 workflow，请在「运行记录」查看进度', 'success');
+        setTimeout(loadRuns, 1500);
+      } catch (e) {
+        toast('触发失败：' + e.message, 'error');
+      }
+    }
+
+    async function dispatchWorkflow(inputs) {
+      await gh('/repos/' + state.repo + '/actions/workflows/deploy.yml/dispatches', {
+        method: 'POST',
+        body: JSON.stringify({ ref: state.defaultBranch, inputs }),
+      });
+    }
+
+    // ═══════════════════════════════════════════════
+    // Actions 运行记录
+    // ═══════════════════════════════════════════════
+    async function loadRuns() {
+      const el = document.getElementById('runs-list');
+
+      try {
+        const data = await gh('/repos/' + state.repo + '/actions/runs?per_page=8&workflow_id=deploy.yml');
+        const runs = data.workflow_runs || [];
+
+        if (!runs.length) {
+          el.innerHTML = '<div class="empty-state" style="padding:28px;"><p>暂无运行记录</p></div>';
+          return;
+        }
+
+        el.innerHTML = runs.map(r => {
+          const badge = statusBadge(r.status, r.conclusion);
+          const time  = relativeTime(r.updated_at);
+          const title = r.display_title || r.head_commit?.message || r.name;
+          return `
+            <div class="run-item">
+              <div class="run-status">${badge}</div>
+              <div class="run-name">
+                <div class="run-title">${escHtml(title)}</div>
+                <div class="run-sub">${r.event === 'push' ? '📤 Push 触发' : '🖐 手动触发'}</div>
+              </div>
+              <div class="run-time">${time}</div>
+              <a href="${r.html_url}" target="_blank" class="btn btn-ghost btn-sm" title="在 GitHub 查看">↗</a>
+            </div>`;
+        }).join('');
+
+      } catch (e) {
+        el.innerHTML = '<div class="empty-state" style="padding:28px;"><p>加载失败：' + e.message + '</p></div>';
+      }
+    }
+
+    function statusBadge(status, conclusion) {
+      if (status === 'queued')      return '<span class="badge badge-muted">⏳ 排队</span>';
+      if (status === 'in_progress') return '<span class="badge badge-info"><span class="spinning">⟳</span> 运行中</span>';
+      if (conclusion === 'success') return '<span class="badge badge-success">✅ 成功</span>';
+      if (conclusion === 'failure') return '<span class="badge badge-error">❌ 失败</span>';
+      if (conclusion === 'cancelled') return '<span class="badge badge-muted">⊘ 取消</span>';
+      return '<span class="badge badge-muted">' + (conclusion || status) + '</span>';
+    }
+
+    function startPoll() {
+      clearInterval(state.pollTimer);
+      state.pollTimer = setInterval(async () => {
+        try {
+          const data = await gh('/repos/' + state.repo + '/actions/runs?per_page=3');
+          const active = (data.workflow_runs || []).some(r =>
+            r.status === 'queued' || r.status === 'in_progress'
+          );
+          if (active) loadRuns();
+        } catch (_) {}
+      }, 8000);
+    }
+
+    // ═══════════════════════════════════════════════
+    // UI 工具
+    // ═══════════════════════════════════════════════
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('tab-btn-' + name).classList.add('active');
+      document.getElementById('tab-' + name).classList.add('active');
+      if (name === 'versions') loadVersions();
+      if (name === 'commands') loadVersions(); // 同步 zip 下拉
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const isDark = html.dataset.theme === 'dark';
+      html.dataset.theme = isDark ? 'light' : 'dark';
+      document.getElementById('theme-toggle').textContent = isDark ? '☀️' : '🌙';
+      localStorage.setItem('cf_deploy_theme', html.dataset.theme);
+    }
+
+    function toast(msg, type = 'info') {
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+      el.textContent = icon + '  ' + msg;
+      document.getElementById('toast-container').appendChild(el);
+      setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3500);
+    }
+
+    function confirm(title, body) {
+      return new Promise(resolve => {
+        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-body').textContent = body;
+        document.getElementById('modal-overlay').classList.add('open');
+        state.modalResolve = resolve;
+      });
+    }
+
+    document.getElementById('modal-confirm-btn').addEventListener('click', () => {
+      closeModal(true);
+    });
+
+    function closeModal(result = false) {
+      document.getElementById('modal-overlay').classList.remove('open');
+      if (state.modalResolve) { state.modalResolve(result); state.modalResolve = null; }
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+    }
+
+    function relativeTime(iso) {
+      const diff = Date.now() - new Date(iso).getTime();
+      const m = Math.floor(diff / 60000);
+      if (m < 1)  return '刚刚';
+      if (m < 60) return m + ' 分钟前';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + ' 小时前';
+      return Math.floor(h / 24) + ' 天前';
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // ═══════════════════════════════════════════════
+    // 初始化
+    // ═══════════════════════════════════════════════
+    (function init() {
+      const saved = localStorage.getItem('cf_deploy_theme');
+      if (saved) {
+        document.documentElement.dataset.theme = saved;
+        document.getElementById('theme-toggle').textContent = saved === 'dark' ? '🌙' : '☀️';
+      }
+
+      // 命令Tab 初始状态
+      document.getElementById('cmd-textarea-row').style.display = 'block';
+    })();
+
+  </script>
+</body>
+</html>
