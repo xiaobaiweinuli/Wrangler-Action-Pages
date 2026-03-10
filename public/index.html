@@ -1165,7 +1165,7 @@
     // GitHub API 封装
     // ═══════════════════════════════════════════════
     async function gh(endpoint, options = {}) {
-      const res = await fetch('https://api.github.com' + endpoint, {
+      const res = await fetch('/api/github' + endpoint, {
         ...options,
         headers: {
           'Authorization': 'Bearer ' + state.pat,
@@ -1257,7 +1257,7 @@
 
       try {
         const tempPat = pat;
-        const res = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator', {
+        const res = await fetch('/api/github/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator', {
           headers: { 'Authorization': 'Bearer ' + tempPat, 'Accept': 'application/vnd.github+json' }
         });
         if (!res.ok) throw new Error('请检查 PAT 权限');

@@ -4,32 +4,37 @@
 
 ---
 
-## 在线访问
+## 部署到 Cloudflare Workers
 
-有两种托管方式，选择其一即可。
+本项目基于 **Cloudflare Workers + Static Assets** 构建：
 
-### 方式一：GitHub Pages
+- `public/index.html`：静态页面，由 Cloudflare CDN 全球分发
+- `worker.js`：代理层，将页面发出的 GitHub API 请求从 Cloudflare 节点转发，解决国内直连 GitHub API 不稳定的问题
 
-将本仓库推送到 GitHub，在仓库 **Settings → Pages → Source** 选择 `main` 分支根目录，等待几分钟后通过 `https://你的用户名.github.io/仓库名` 访问。
+### 文件结构
 
-### 方式二：Cloudflare Pages
-
-仓库已包含 `wrangler.toml`，支持直接部署到 Cloudflare Pages。
-
-**通过 Cloudflare Dashboard（推荐）：**
-
-1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages → Create → Pages**
-2. 连接 GitHub 仓库，框架预设选「无 / None」
-3. 构建命令留空，输出目录填 `.`
-4. 点击部署，完成后通过 `https://cf-deploy.pages.dev`（或自定义域名）访问
-
-**通过 wrangler 命令部署：**
-
-```bash
-wrangler pages deploy .
+```
+/
+├── worker.js        ← Worker 入口（GitHub API 代理）
+├── wrangler.toml    ← 部署配置
+└── public/
+    └── index.html   ← 静态页面
 ```
 
-> Cloudflare Pages 的全球 CDN 访问速度通常优于 GitHub Pages，如果主要在国内使用建议选择此方式。
+### 方式一：通过 Cloudflare Dashboard 连接 GitHub 自动部署（推荐）
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages → Create → Worker**
+2. 选择「Connect to Git」，连接本仓库
+3. 构建命令留空，部署命令填 `wrangler deploy`
+4. 保存后每次推送自动部署，访问地址为 `https://cf-deploy.你的账户名.workers.dev`
+
+### 方式二：通过 wrangler 命令手动部署
+
+```bash
+wrangler deploy
+```
+
+> 所有 GitHub API 请求均经由 Cloudflare 节点中转，国内无需任何代理即可正常使用。
 
 ---
 
