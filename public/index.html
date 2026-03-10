@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CF Deploy — Cloudflare 部署控制台</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f6821f'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-size='20'%3E☁%3C/text%3E%3C/svg%3E">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
@@ -884,16 +885,62 @@
     .cmd-line-error.show { display: block; }
     .form-textarea.has-error { border-color: var(--error); }
 
-    /* ── 版本调试开关 ────────────────────────────────── */
-    .version-debug-label {
-      display: flex;
+    /* ── 调试模式 Toggle 开关（三处统一使用）────────── */
+    .debug-toggle {
+      display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
       font-size: 12px;
       color: var(--text-muted);
-      cursor: pointer;
       white-space: nowrap;
     }
+    .debug-toggle input[type="checkbox"] { display: none; }
+    .debug-toggle-track {
+      width: 34px;
+      height: 19px;
+      border-radius: 10px;
+      background: var(--bg-hover);
+      border: 1.5px solid var(--border);
+      position: relative;
+      flex-shrink: 0;
+      transition: background .2s, border-color .2s;
+    }
+    .debug-toggle-track::after {
+      content: '';
+      position: absolute;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      top: 2px;
+      left: 2px;
+      transition: transform .2s, background .2s;
+    }
+    .debug-toggle input:checked + .debug-toggle-track {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+    }
+    .debug-toggle input:checked + .debug-toggle-track::after {
+      transform: translateX(15px);
+      background: var(--accent);
+    }
+    .debug-toggle-label { line-height: 1; }
+
+    /* 调试 hint（勾选后显示）*/
+    .debug-hint {
+      display: none;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      padding: 7px 10px;
+      background: var(--accent-dim);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+      line-height: 1.5;
+    }
+    .debug-hint.show { display: block; }
 
     /* ── 进度步骤扩展（编码步骤）────────────────────── */
     #step-encode { display: none; }
@@ -1196,12 +1243,13 @@
                 <button class="btn btn-primary" id="upload-btn" onclick="startUpload()">
                   ☁ 上传并部署
                 </button>
-                <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer;" title="开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启">
-                  <input type="checkbox" id="debug-mode-check" style="accent-color:var(--accent);">
-                  调试模式
+                <label class="debug-toggle" title="开启后 Wrangler 完整日志将输出到 GitHub Actions">
+                  <input type="checkbox" id="debug-mode-check" onchange="toggleDebugHint('deploy-debug-hint',this)">
+                  <span class="debug-toggle-track"></span>
+                  <span class="debug-toggle-label">调试模式</span>
                 </label>
               </div>
-              <div class="form-hint" style="margin-top:8px;">调试模式：开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启</div>
+              <div class="debug-hint" id="deploy-debug-hint">开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启</div>
             </div>
 
             <!-- Progress -->
@@ -1300,11 +1348,13 @@
 
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
               <button class="btn btn-primary" onclick="triggerWorkflow()">▶ 执行</button>
-              <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-muted);cursor:pointer;">
-                <input type="checkbox" id="cmd-debug-check" style="accent-color:var(--accent);">
-                调试模式
+              <label class="debug-toggle" title="开启后 Wrangler 完整日志将输出到 GitHub Actions">
+                <input type="checkbox" id="cmd-debug-check" onchange="toggleDebugHint('cmd-debug-hint',this)">
+                <span class="debug-toggle-track"></span>
+                <span class="debug-toggle-label">调试模式</span>
               </label>
             </div>
+            <div class="debug-hint" id="cmd-debug-hint">开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启</div>
 
           </div>
         </div>
@@ -1374,6 +1424,11 @@
       input.type  = show ? 'text' : 'password';
       btn.textContent = show ? '👁' : '🙈';
       btn.title   = show ? '隐藏 Token' : '显示 Token';
+    }
+
+    function toggleDebugHint(hintId, checkbox) {
+      const hint = document.getElementById(hintId);
+      if (hint) hint.classList.toggle('show', checkbox.checked);
     }
 
     // ═══════════════════════════════════════════════
@@ -1587,6 +1642,7 @@
       sessionStorage.removeItem('cf_pat');
       sessionStorage.removeItem('cf_repo');
       sessionStorage.removeItem('cf_branch');
+      sessionStorage.removeItem('cf_tab');
 
       document.getElementById('auth-panel').style.display = 'block';
       document.getElementById('main-panel').classList.remove('visible');
@@ -1994,9 +2050,10 @@
                 <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}','${f.sha.substring(0,8)}')">🚀 部署</button>
                 <button class="btn btn-secondary btn-sm" onclick="downloadVersion('${f.name}','${f.download_url}')">⬇ 下载</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑 删除</button>
-                <label class="version-debug-label" title="开启后可在 GitHub Actions 查看完整日志">
-                  <input type="checkbox" id="dbg-${f.sha.substring(0,8)}" style="accent-color:var(--accent);">
-                  调试模式
+                <label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">
+                  <input type="checkbox" id="dbg-${f.sha.substring(0,8)}">
+                  <span class="debug-toggle-track"></span>
+                  <span class="debug-toggle-label">调试模式</span>
                 </label>
               </div>
             </div>
@@ -2507,8 +2564,10 @@
       document.getElementById('tab-btn-' + name).classList.add('active');
       document.getElementById('tab-' + name).classList.add('active');
 
-      // 版本管理：只在尚未加载时才自动触发（避免每次切 tab 都转圈）
-      // 已有数据则直接展示，用户可点刷新按钮手动更新
+      // 记住当前 tab，刷新后恢复
+      sessionStorage.setItem('cf_tab', name);
+
+      // 版本管理：只在尚未加载时才自动触发
       if (name === 'versions') {
         const list = document.getElementById('versions-list');
         const isBlank = list.querySelector('.loading-row') !== null || list.innerHTML.trim() === '';
@@ -2596,11 +2655,9 @@
       const savedBranch = sessionStorage.getItem('cf_branch');
 
       if (savedPat && savedRepo) {
-        // 填入表单（供浏览器密码管理器识别）
         document.getElementById('repo-input').value = savedRepo;
         document.getElementById('pat-input').value  = savedPat;
 
-        // 直接恢复状态，不再重新请求 API 验证（刷新前已验证过）
         state.pat           = savedPat;
         state.repo          = savedRepo;
         state.defaultBranch = savedBranch || 'main';
@@ -2612,7 +2669,9 @@
         document.getElementById('repo-badge-text').textContent = savedRepo;
         document.getElementById('disconnect-btn').classList.add('visible');
 
-        loadVersions();
+        // 恢复上次停留的 tab（默认 deploy）
+        const savedTab = sessionStorage.getItem('cf_tab') || 'deploy';
+        switchTab(savedTab);
         loadRuns();
       }
     })();
