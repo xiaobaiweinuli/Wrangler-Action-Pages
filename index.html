@@ -889,6 +889,7 @@
 
   <!-- Hidden file inputs -->
   <input type="file" id="folder-input" webkitdirectory multiple style="display:none">
+  <input type="file" id="multi-input" multiple style="display:none">
   <input type="file" id="zip-input" accept=".zip" style="display:none">
 
   <div class="container">
@@ -986,9 +987,9 @@
             <div class="drop-zone" id="drop-zone">
               <div class="drop-zone-icon">📂</div>
               <div class="drop-zone-title">选择项目文件夹或 ZIP 文件</div>
-              <div class="drop-zone-sub">拖放 ZIP 文件到此处，或使用下方按钮选择</div>
+              <div class="drop-zone-sub" id="drop-zone-sub">拖放 ZIP 文件到此处，或使用下方按钮选择</div>
               <div class="drop-zone-actions">
-                <button class="btn btn-secondary" onclick="document.getElementById('folder-input').click()">
+                <button class="btn btn-secondary" id="btn-pick-folder" onclick="pickFolder()">
                   📁 选择文件夹
                 </button>
                 <button class="btn btn-secondary" onclick="document.getElementById('zip-input').click()">
@@ -1008,6 +1009,13 @@
                   </div>
                 </div>
                 <button class="btn btn-ghost btn-sm" onclick="clearFile()">✕ 清除</button>
+              </div>
+
+              <!-- 移动端降级时显示：让用户填写文件夹名作为打包路径前缀 -->
+              <div id="folder-name-row" style="display:none;margin-bottom:14px;">
+                <div class="form-label" style="margin-bottom:6px;">项目文件夹名（将作为 zip 内的根目录）</div>
+                <input type="text" class="form-input mono" id="folder-name-input" placeholder="my-worker">
+                <div class="form-hint">移动端无法直接读取文件夹名，请手动填写</div>
               </div>
 
               <div class="deploy-name-row">
@@ -1341,10 +1349,50 @@
     }
 
     // ═══════════════════════════════════════════════
+    // webkitdirectory 支持检测
+    // ═══════════════════════════════════════════════
+    // 注意：Android/iOS 上 'webkitdirectory' in input 返回 true，
+    // 但实际无法选择文件夹且 change 事件不触发。
+    // 可靠判断方式：通过 UA + touch 检测移动端，移动端一律降级为多文件选择。
+    function isMobileDevice() {
+      return (
+        navigator.maxTouchPoints > 1 ||
+        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      );
+    }
+
+    const USE_MULTI_FALLBACK = isMobileDevice();
+
+    // 初始化时更新 UI 提示
+    (function initFolderUI() {
+      if (USE_MULTI_FALLBACK) {
+        document.getElementById('btn-pick-folder').textContent = '📁 选择项目文件';
+        document.getElementById('drop-zone-sub').textContent =
+          '当前设备不支持文件夹选择，可选择项目内的所有文件，或直接选择 ZIP 文件';
+      }
+    })();
+
+    // ═══════════════════════════════════════════════
     // 文件选择 & 拖放
     // ═══════════════════════════════════════════════
+
+    // 统一入口：根据设备决定触发哪个 input
+    function pickFolder() {
+      if (USE_MULTI_FALLBACK) {
+        document.getElementById('multi-input').click();
+      } else {
+        document.getElementById('folder-input').click();
+      }
+    }
+
+    // 桌面端：webkitdirectory（有完整路径信息）
     document.getElementById('folder-input').addEventListener('change', (e) => {
-      handleFolderFiles(e.target.files);
+      if (e.target.files.length) handleFolderFiles(e.target.files);
+    });
+
+    // 移动端降级：多文件选择（无路径信息）
+    document.getElementById('multi-input').addEventListener('change', (e) => {
+      if (e.target.files.length) handleMultiFiles(e.target.files);
     });
 
     document.getElementById('zip-input').addEventListener('change', (e) => {
@@ -1366,7 +1414,6 @@
       dropZone.classList.remove('drag-over');
       const files = e.dataTransfer.files;
       if (!files.length) return;
-
       const file = files[0];
       if (file.name.endsWith('.zip')) {
         handleZipFile(file);
@@ -1375,30 +1422,58 @@
       }
     });
 
+    // 桌面端：有 webkitRelativePath，可读取文件夹名
     async function handleFolderFiles(fileList) {
       if (!fileList.length) return;
       const folderName = fileList[0].webkitRelativePath.split('/')[0] || 'project';
       setDeployNameInput(folderName);
-      document.getElementById('file-original-name').textContent = '文件夹：' + folderName + '（' + fileList.length + ' 个文件）';
+      document.getElementById('file-original-name').textContent =
+        '文件夹：' + folderName + '（' + fileList.length + ' 个文件）';
       document.getElementById('file-icon').textContent = '📁';
       document.getElementById('file-size').textContent = '打包后显示大小';
+      document.getElementById('folder-name-row').style.display = 'none';
       showFilePreview();
-      state.pendingBlob = { type: 'folder', files: fileList };
+      state.pendingBlob = { type: 'folder', files: fileList, folderName };
+    }
+
+    // 移动端降级：无 webkitRelativePath，需用户填写文件夹名
+    async function handleMultiFiles(fileList) {
+      if (!fileList.length) return;
+      // 默认文件夹名：无法从路径获取，使用 'project' 占位
+      const defaultName = 'my-project';
+      setDeployNameInput(defaultName);
+      document.getElementById('file-original-name').textContent =
+        '已选择 ' + fileList.length + ' 个文件';
+      document.getElementById('file-icon').textContent = '📁';
+      document.getElementById('file-size').textContent = '打包后显示大小';
+
+      // 显示文件夹名输入框
+      document.getElementById('folder-name-row').style.display = 'block';
+      document.getElementById('folder-name-input').value = defaultName;
+
+      // 同步文件夹名输入到部署名
+      document.getElementById('folder-name-input').oninput = function() {
+        setDeployNameInput(this.value || defaultName);
+      };
+
+      showFilePreview();
+      state.pendingBlob = { type: 'multi', files: fileList };
     }
 
     function handleZipFile(file) {
-      const name = file.name.replace(/\\.zip$/i, '');
+      const name = file.name.replace(/\.zip$/i, '');
       setDeployNameInput(name);
       document.getElementById('file-original-name').textContent = file.name;
       document.getElementById('file-icon').textContent = '🗜️';
       document.getElementById('file-size').textContent = formatSize(file.size);
+      document.getElementById('folder-name-row').style.display = 'none';
       showFilePreview();
       state.pendingBlob = { type: 'zip', file };
     }
 
     function setDeployNameInput(name) {
-      const clean = name.replace(/[\\s]+/g, '-').replace(/[^\\w\\u4e00-\\u9fa5.\\-]/g, '');
-      document.getElementById('deploy-name-input').value = clean;
+      const clean = (name || 'project').replace(/[\s]+/g, '-').replace(/[^\w\u4e00-\u9fa5.\-]/g, '');
+      document.getElementById('deploy-name-input').value = clean || 'project';
     }
 
     function showFilePreview() {
@@ -1410,7 +1485,9 @@
       state.pendingBlob = null;
       document.getElementById('file-preview').style.display = 'none';
       document.getElementById('progress-panel').style.display = 'none';
+      document.getElementById('folder-name-row').style.display = 'none';
       document.getElementById('folder-input').value = '';
+      document.getElementById('multi-input').value = '';
       document.getElementById('zip-input').value = '';
     }
 
@@ -1438,7 +1515,13 @@
         // 步骤 1：打包
         if (state.pendingBlob.type === 'folder') {
           setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包文件夹中...');
-          zipBlob = await packFolder(state.pendingBlob.files);
+          zipBlob = await packFolder(state.pendingBlob.files, state.pendingBlob.folderName);
+          document.getElementById('file-size').textContent = formatSize(zipBlob.size);
+        } else if (state.pendingBlob.type === 'multi') {
+          // 移动端降级：用用户填写的文件夹名作为 zip 内路径前缀
+          const folderPrefix = document.getElementById('folder-name-input').value.trim() || 'project';
+          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包文件中...');
+          zipBlob = await packFolder(state.pendingBlob.files, folderPrefix);
           document.getElementById('file-size').textContent = formatSize(zipBlob.size);
         } else {
           zipBlob = state.pendingBlob.file;
@@ -1476,11 +1559,16 @@
       }
     }
 
-    async function packFolder(fileList) {
+    async function packFolder(fileList, folderPrefix) {
       const zip = new JSZip();
       for (const file of fileList) {
         const buf = await file.arrayBuffer();
-        zip.file(file.webkitRelativePath, buf);
+        // 桌面端有 webkitRelativePath（如 project/src/index.js）
+        // 移动端降级时 webkitRelativePath 为空，用 folderPrefix/文件名 代替
+        const path = file.webkitRelativePath
+          ? file.webkitRelativePath
+          : (folderPrefix ? folderPrefix + '/' + file.name : file.name);
+        zip.file(path, buf);
       }
       return zip.generateAsync(
         { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
