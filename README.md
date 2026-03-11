@@ -1,173 +1,144 @@
-# Cloudflare Workers 部署与拉取控制台（Wrangler GitHub Actions 方案）
+# CF Deploy — Cloudflare 部署控制台
 
-**无需本地 Wrangler CLI，通过浏览器控制台 + GitHub Actions 实现 Cloudflare Workers / Pages 的完整部署与代码归档，完美支持手机、AArch64 等无法运行 Wrangler 的设备。**
-
-网页控制台地址：[wrangler-action.bxiao.workers.dev](https://wrangler-action.bxiao.workers.dev/)
+通过浏览器直接将 Cloudflare Worker / Pages 项目部署到 Cloudflare，无需命令行，无需 Git 客户端。专为无法在本机运行 Wrangler CLI 的设备（如手机、ARM 设备）设计。
 
 ---
 
-## 目录结构
+## 项目结构
+
+本项目基于 **Cloudflare Workers + Static Assets** 构建，所有 GitHub API 请求和文件下载均经由 Cloudflare 节点代理，国内无需任何代理即可正常使用。
 
 ```
-仓库根目录/
-├── .github/
-│   └── workflows/
-│       ├── auto-deploy.yml       # Push 触发，自动部署根目录最新 zip
-│       ├── deploy.yml            # 手动触发，下拉选 zip 部署
-│       ├── command.yml           # 手动触发，执行 wrangler 命令
-│       ├── fetch.yml             # 手动触发，从 Cloudflare 拉取 Worker 归档
-│       └── update-zip-list.yml   # 自动维护 deploy.yml 的压缩包下拉列表
-├── builds/
-│   └── worker-name-20260101-120000.zip  # fetch.yml 归档的 Worker 代码
-├── your-worker.zip               # 上传的项目压缩包（任意名称）
-└── README.md
+/
+├── worker.js        ← Worker 入口（GitHub API + 文件下载代理）
+├── wrangler.toml    ← 部署配置
+└── public/
+    └── index.html   ← 静态页面（Cloudflare CDN 分发）
 ```
+
+**Worker 代理路由：**
+
+| 路径 | 代理目标 | 用途 |
+|---|---|---|
+| `/api/github/*` | `api.github.com/*` | GitHub API |
+| `/api/raw/*` | `raw.githubusercontent.com/*` | zip 文件下载 |
+
+---
+
+## 部署此控制台
+
+### 方式一：Cloudflare Dashboard 连接 GitHub（推荐）
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages → Create → Worker**
+2. 选择「Connect to Git」，连接本仓库
+3. 构建命令留空，部署命令填 `wrangler deploy`
+4. 保存后每次推送自动部署
+
+### 方式二：wrangler 命令手动部署
+
+```bash
+wrangler deploy
+```
+
+---
+
+## 使用前提
+
+此网页是 [**Wrangler-Action**](.github/workflows/deploy.yml)的配套工具，需要目标仓库已完成以下配置
+
+- 已添加 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`GH_WORKFLOW_TOKEN` 三个 Secret
+- 仓库中已存在 `.github/workflows/deploy.yml`
 
 ---
 
 ## 快速开始
 
-### 第一步：配置 Secrets
+### 1. 创建 GitHub PAT
 
-在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中添加：
+1. 打开 [GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
+2. 点击 **Generate new token (classic)**
+3. 勾选权限：`repo`（读写仓库文件）+ `workflow`（触发 Actions）
+4. 生成后**立即复制**（只显示一次）
 
-| Secret 名称 | 是否必填 | 说明 |
+### 2. 连接仓库
+
+打开网页后：
+
+1. **仓库地址** 填写 `owner/repo-name` 格式（点「获取列表」可从 GitHub 拉取仓库下拉）
+2. **GitHub PAT** 填写 Token（点击眼睛图标可显示 / 隐藏）
+3. 点击「连接」，建议在浏览器弹出「保存密码」时保存，下次打开自动填充
+
+> PAT 由浏览器密码管理器加密保存，不写入 localStorage。  
+> 刷新页面自动恢复连接状态和上次所在的 Tab，关闭标签页后会话自动清除。
+
+---
+
+## 功能说明
+
+### 🚀 部署
+
+支持三种方式选择项目文件：
+
+| 方式 | 支持环境 | 说明 |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | ✅ 必填 | Cloudflare API Token（需含 Worker 编辑权限） |
-| `CLOUDFLARE_ACCOUNT_ID` | ✅ 必填 | Cloudflare 账户 ID |
-| `GH_WORKFLOW_TOKEN` | ✅ 必填 | 带 `workflow` 权限的 GitHub PAT |
+| 选择文件夹 | 桌面 Chrome/Edge、Android Chrome 132+ | 浏览器内递归打包，完整保留子目录结构 |
+| 选择多个文件 | 全平台降级 | 无子目录，适合 iOS / 旧版 Android |
+| 选择 ZIP 文件 | 全平台 | 直接使用已有压缩包 |
+| 拖放 ZIP 文件 | 桌面 | 拖入上传区域 |
 
-**获取 Cloudflare API Token：**
+上传文件名默认取文件夹名或 zip 文件名，可手动修改。上传完成后自动触发 `deploy.yml` 并轮询进度（最多 2 分钟），完成后 toast 通知结果。
 
-1. 进入 [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/?to=/:account/api-tokens)
-2. 点击 **Create Token** → 选择 **Edit Cloudflare Workers** 模板
-3. 限定 Token 的账户和区域范围（建议最小权限原则）
+**调试模式**：勾选后 Wrangler 完整日志输出到 GitHub Actions，部署出错时建议开启。
 
-**创建 GH_WORKFLOW_TOKEN：**
+### 📦 版本管理
 
-> `update-zip-list.yml` 需要修改 `.github/workflows/deploy.yml`，GitHub 原生 `GITHUB_TOKEN` 无权操作 workflows 目录，必须使用带 `workflow` 权限的 PAT。
+列出仓库根目录所有 `.zip` 文件，每条记录支持：
 
-1. 进入 [GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
-2. 点击 **Generate new token (classic)**，勾选 **`workflow`**（会自动附带 `repo`）
-3. 将 token 填入仓库 Secret `GH_WORKFLOW_TOKEN`
+- **🚀 部署**：一键触发该版本部署（用于回滚），可独立开启调试模式
+- **⬇ 下载**：经 Cloudflare Worker 代理下载，国内可正常访问
+- **🗑 删除**：删除不再需要的旧版本
 
----
+### ⚡ 命令执行
 
-### 第二步：准备项目压缩包
+在浏览器中触发任意 `wrangler` 命令，支持三种运行模式：
 
-压缩包解压后根层必须包含 wrangler 配置文件（`.toml` / `.jsonc` / `.json` 均可）：
+| 模式 | 说明 |
+|---|---|
+| `wrangler-command` | 只执行命令，不部署 |
+| `deploy` | 只部署压缩包 |
+| `all` | 先执行命令，再部署 |
 
-```
-your-project.zip
-├── wrangler.toml   ← 必须在根层
-├── src/
-│   └── index.js
-└── package.json
-```
-
----
-
-### 第三步：上传并部署
-
-将 `.zip` 推送到仓库根目录，两个 Action 自动并行触发：
-
-- **`auto-deploy.yml`**：自动选最新 zip → 解压 → 安装依赖 → 构建 → 部署
-- **`update-zip-list.yml`**：扫描根目录 + `builds/` → 更新 `deploy.yml` 下拉选项
-
----
-
-## 五个 Workflow 说明
-
-### `auto-deploy.yml` — 自动部署
-
-- **触发：** push 根目录 `*.zip`
-- **逻辑：** 按 git 提交时间自动选最新 zip，静默部署（无调试输出）
-- **适用：** 日常开发迭代，上传即部署
-
-### `deploy.yml` — 手动部署
-
-- **触发：** 手动（Actions → Run workflow）
-- **功能：** 下拉选择任意 zip（含 `builds/` 归档），支持调试模式
-- **适用：** 版本回滚、指定归档重部署
-
-### `command.yml` — 执行 wrangler 命令
-
-- **触发：** 手动
-- **输入：** 每行一条 wrangler 命令（必须以 `wrangler ` 开头）
-- **适用：** 创建 D1、KV Namespace、R2 Bucket、Vectorize Index 等资源
+命令每行一条，**必须以 `wrangler ` 开头**，输入框实时校验并高亮错误行。例如：
 
 ```
 wrangler d1 create my-database
-wrangler kv namespace create MY_KV
-wrangler r2 bucket create my-bucket
 wrangler vectorize create email-vectors --dimensions=768
+wrangler r2 bucket create my-bucket
 ```
 
-### `fetch.yml` — 从 Cloudflare 拉取 Worker
+### 📋 运行记录
 
-- **触发：** 手动
-- **输入：** Cloudflare Dashboard 上的 Worker 名称
-- **逻辑：**
-  1. 用 `create-cloudflare --existing-script` 拉取线上 Worker 代码
-  2. 删除 `node_modules` 等依赖
-  3. 打包为 `builds/{name}-{北京时间戳}.zip`
-  4. commit 推送到仓库 → 自动触发 `update-zip-list.yml`
-- **适用：** 线上代码备份、跨设备同步 Worker 源码
+显示最近 8 次 `deploy.yml` 的运行状态。触发部署后自动轮询（每 5 秒，最多 2 分钟），完成后 toast 通知成功或失败。
 
-### `update-zip-list.yml` — 维护下拉列表
+**内联日志查看**：点击「📄 日志」在页面内查看完整日志，无需跳转 GitHub：
 
-- **触发：** push `*.zip`（根目录）/ push `builds/*.zip`（fetch 归档后）/ 手动
-- **作用：** 扫描根目录 + `builds/` 所有 zip，自动更新 `deploy.yml` 的下拉选项
+- 自动优先展示失败的 Job（便于快速定位错误）
+- 支持关键字搜索与高亮，↑↓ 按钮逐条跳转
+- 一键复制全文
+- 日志已本地缓存，关闭后再次打开无需重新请求
 
 ---
 
-## 自动触发链路
+## 多仓库使用
 
-```
-上传 zip → 根目录
-  ├── auto-deploy.yml      → 静默部署
-  └── update-zip-list.yml  → 更新下拉列表
-
-手动触发 fetch.yml
-  → 拉取 Worker 代码
-  → 归档 builds/xxx.zip（push）
-  └── update-zip-list.yml  → 自动更新下拉列表（含 builds/ 归档）
-```
+- **历史下拉**：仓库地址输入框记录最近 10 个仓库，点击弹出下拉一键切换
+- **从 GitHub 获取**：点击「获取列表」用 PAT 拉取所有可访问的仓库
+- **浏览器自动匹配**：以仓库地址作为用户名保存凭据，切换仓库时浏览器自动填入对应 PAT
 
 ---
 
-## 网页控制台功能
+## 注意事项
 
-控制台部署在 Cloudflare Worker 上，解决国内访问 GitHub API 慢的问题（所有请求通过 Worker 代理）。
-
-| Tab | 功能 |
-|---|---|
-| 🚀 部署 | 拖拽文件夹或 zip，浏览器内打包上传，自动触发部署 |
-| 📦 版本管理 | 查看所有 zip，一键部署 / 回滚 / 下载 / 删除 |
-| ⚡ 命令执行 | 填写 wrangler 命令，触发 `command.yml` |
-| ☁ 拉取归档 | 输入 Worker 名称拉取代码，查看 builds/ 归档列表 |
-| 📋 运行记录 | 实时查看 GitHub Actions 运行状态和完整日志 |
-
----
-
-## 常见问题
-
-**Q：为什么需要 PAT，不能用 GITHUB_TOKEN？**
-
-A：GitHub 硬性限制，`GITHUB_TOKEN` 永远无法修改 `.github/workflows/` 目录，任何 `permissions` 设置均无效。`update-zip-list.yml` 需要写入 `deploy.yml`，因此必须使用 PAT。
-
-**Q：`fetch.yml` 拉取的是 TypeScript 源码还是编译产物？**
-
-A：Cloudflare 存储的是 esbuild bundle 后的单文件 JS，不是 TypeScript 源码。拉取后的 `src/` 目录中是 bundle 产物，体积较大属正常现象。
-
-**Q：手动触发时下拉菜单没有新文件？**
-
-A：`update-zip-list.yml` 在 push 后自动运行，通常需要几十秒。刚推送就立即触发手动部署时可能列表还未更新，稍等片刻再触发即可，或选择「自动选最新」选项。
-
-**Q：`builds/` 目录下的归档会触发自动部署吗？**
-
-A：不会。`auto-deploy.yml` 只监听根目录 `*.zip`（`paths: - '*.zip'`），`builds/*.zip` 不在监听范围内，fetch 归档不会意外触发自动部署。
-
-**Q：Pages 项目如何部署？**
-
-A：`wrangler.toml` 中填写 `pages_build_output_dir` 字段即可，deploy workflow 会自动识别并执行 `npm run build` + `wrangler pages deploy`。
+- GitHub API 单文件上传限制 **100MB**，建议压缩包控制在 95MB 以内
+- iOS Safari 不支持选择文件夹，建议提前打包好 zip 再上传
+- PAT 到期后需重新生成并重新连接

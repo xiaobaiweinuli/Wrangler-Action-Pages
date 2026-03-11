@@ -1,6 +1,10 @@
-# Cloudflare Wrangler GitHub Action 部署方案
+# Cloudflare Workers 部署与拉取控制台（Wrangler GitHub Actions 方案）
 
-通过 GitHub Actions 将 Cloudflare Workers / Pages 项目部署到 Cloudflare，解决 Wrangler CLI 不兼容 AArch64 架构（手机、部分 ARM 设备）的问题。
+**无需本地 Wrangler CLI，通过浏览器控制台 + GitHub Actions 实现 Cloudflare Workers / Pages 的完整部署与代码归档，完美支持手机、AArch64 等无法运行 Wrangler 的设备。**
+
+网页控制台地址：[wrangler-action.bxiao.workers.dev](https://wrangler-action.bxiao.workers.dev/)
+
+---
 
 ## 目录结构
 
@@ -8,9 +12,14 @@
 仓库根目录/
 ├── .github/
 │   └── workflows/
-│       ├── deploy.yml            # 主部署 workflow
-│       └── update-zip-list.yml   # 自动维护压缩包下拉列表
-├── your-worker.zip               # 上传你的项目压缩包（任意名称）
+│       ├── auto-deploy.yml       # Push 触发，自动部署根目录最新 zip
+│       ├── deploy.yml            # 手动触发，下拉选 zip 部署
+│       ├── command.yml           # 手动触发，执行 wrangler 命令
+│       ├── fetch.yml             # 手动触发，从 Cloudflare 拉取 Worker 归档
+│       └── update-zip-list.yml   # 自动维护 deploy.yml 的压缩包下拉列表
+├── builds/
+│   └── worker-name-20260101-120000.zip  # fetch.yml 归档的 Worker 代码
+├── your-worker.zip               # 上传的项目压缩包（任意名称）
 └── README.md
 ```
 
@@ -20,11 +29,11 @@
 
 ### 第一步：配置 Secrets
 
-在 GitHub 仓库页面进入 **Settings → Secrets and variables → Actions**，添加以下 Secret：
+在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中添加：
 
 | Secret 名称 | 是否必填 | 说明 |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | ✅ 必填 | Cloudflare API Token |
+| `CLOUDFLARE_API_TOKEN` | ✅ 必填 | Cloudflare API Token（需含 Worker 编辑权限） |
 | `CLOUDFLARE_ACCOUNT_ID` | ✅ 必填 | Cloudflare 账户 ID |
 | `GH_WORKFLOW_TOKEN` | ✅ 必填 | 带 `workflow` 权限的 GitHub PAT |
 
@@ -33,183 +42,132 @@
 1. 进入 [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/?to=/:account/api-tokens)
 2. 点击 **Create Token** → 选择 **Edit Cloudflare Workers** 模板
 3. 限定 Token 的账户和区域范围（建议最小权限原则）
-4. 复制生成的 Token 填入 Secret
 
-**获取 Cloudflare Account ID：**
+**创建 GH_WORKFLOW_TOKEN：**
 
-登录 Cloudflare Dashboard，右侧栏「Account ID」即为所需值。
-
-**创建 GH_WORKFLOW_TOKEN（必须）：**
-
-> **为什么需要 PAT？** 这是 GitHub 的硬性安全限制：Actions 自动生成的 `GITHUB_TOKEN` 永远无法修改 `.github/workflows/` 目录下的文件，任何 `permissions` 设置都无效。`update-zip-list.yml` 需要更新 `deploy.yml` 的下拉选项，因此必须使用带 `workflow` 权限的个人 PAT。
+> `update-zip-list.yml` 需要修改 `.github/workflows/deploy.yml`，GitHub 原生 `GITHUB_TOKEN` 无权操作 workflows 目录，必须使用带 `workflow` 权限的 PAT。
 
 1. 进入 [GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
-2. 点击 **Generate new token (classic)**
-3. **Select scopes** 中勾选 **`workflow`**（会自动同时勾选 `repo`）
-4. 设置合适的过期时间（建议 1 年，到期前记得更新）
-5. 点击 **Generate token**，立即复制 token 值（只显示一次）
-6. 将 token 值填入仓库 Secret **`GH_WORKFLOW_TOKEN`**
+2. 点击 **Generate new token (classic)**，勾选 **`workflow`**（会自动附带 `repo`）
+3. 将 token 填入仓库 Secret `GH_WORKFLOW_TOKEN`
+
+---
 
 ### 第二步：准备项目压缩包
 
-将你的 Cloudflare 项目打包成 `.zip` 文件。压缩包解压后根层必须包含 `wrangler.toml`：
+压缩包解压后根层必须包含 wrangler 配置文件（`.toml` / `.jsonc` / `.json` 均可）：
 
 ```
 your-project.zip
 ├── wrangler.toml   ← 必须在根层
 ├── src/
 │   └── index.js
-├── package.json
-└── ...
-```
-
-### 第三步：上传压缩包触发部署
-
-将 `.zip` 文件推送到仓库根目录，两个 Action 会自动并行运行：
-
-- **`deploy.yml`**：自动选择最新压缩包 → 解压 → 检测项目类型 → 安装依赖 → 部署
-- **`update-zip-list.yml`**：扫描所有压缩包 → 更新手动触发的下拉菜单选项
-
----
-
-## 使用说明
-
-### 自动部署（推送触发）
-
-每次向仓库根目录推送 `.zip` 文件时自动触发，**全程静默运行**，不输出任何 Wrangler 日志。部署结果只显示：
-
-```
-✅ 部署成功
-```
-
-或
-
-```
-❌ 部署失败（退出码：1）
-💡 提示：勾选「调试模式」重新运行可查看详细错误日志
+└── package.json
 ```
 
 ---
 
-### 手动触发（完整选项）
+### 第三步：上传并部署
 
-进入仓库 **Actions → 🚀 部署到 Cloudflare → Run workflow**，有以下输入项：
+将 `.zip` 推送到仓库根目录，两个 Action 自动并行触发：
 
-#### 运行模式（必选）
+- **`auto-deploy.yml`**：自动选最新 zip → 解压 → 安装依赖 → 构建 → 部署
+- **`update-zip-list.yml`**：扫描根目录 + `builds/` → 更新 `deploy.yml` 下拉选项
 
-| 模式 | 说明 |
-|---|---|
-| `deploy` | 只部署压缩包（默认）|
-| `wrangler-command` | 只执行 wrangler 命令，不部署压缩包 |
-| `all` | 先执行 wrangler 命令，再部署压缩包 |
+---
 
-#### 选择压缩包（`deploy` / `all` 模式有效）
+## 五个 Workflow 说明
 
-下拉菜单列出仓库中所有压缩包，由 `update-zip-list.yml` 自动维护。不选则默认部署最新压缩包：
+### `auto-deploy.yml` — 自动部署
+
+- **触发：** push 根目录 `*.zip`
+- **逻辑：** 按 git 提交时间自动选最新 zip，静默部署（无调试输出）
+- **适用：** 日常开发迭代，上传即部署
+
+### `deploy.yml` — 手动部署
+
+- **触发：** 手动（Actions → Run workflow）
+- **功能：** 下拉选择任意 zip（含 `builds/` 归档），支持调试模式
+- **适用：** 版本回滚、指定归档重部署
+
+### `command.yml` — 执行 wrangler 命令
+
+- **触发：** 手动
+- **输入：** 每行一条 wrangler 命令（必须以 `wrangler ` 开头）
+- **适用：** 创建 D1、KV Namespace、R2 Bucket、Vectorize Index 等资源
 
 ```
-[deploy/all] 选择压缩包:
-  ● 自动选最新        ← 默认
-  ○ worker-v2.zip
-  ○ worker-v1.zip
-```
-
-#### 自定义命令（`wrangler-command` / `all` 模式有效）
-
-在输入框中填写完整的 wrangler 命令，**每行一条，且每条命令必须以 `wrangler ` 开头**（安全校验，不符合格式会直接报错退出）：
-
-```
-wrangler d1 create email-monitor-db
-wrangler vectorize create email-vectors --dimensions=768
+wrangler d1 create my-database
+wrangler kv namespace create MY_KV
 wrangler r2 bucket create my-bucket
+wrangler vectorize create email-vectors --dimensions=768
 ```
 
-空行和 `#` 开头的注释行会自动跳过。任意一条命令失败都会报错，并显示是第几条命令出了问题。
+### `fetch.yml` — 从 Cloudflare 拉取 Worker
 
-#### 调试模式（所有模式有效）
+- **触发：** 手动
+- **输入：** Cloudflare Dashboard 上的 Worker 名称
+- **逻辑：**
+  1. 用 `create-cloudflare --existing-script` 拉取线上 Worker 代码
+  2. 删除 `node_modules` 等依赖
+  3. 打包为 `builds/{name}-{北京时间戳}.zip`
+  4. commit 推送到仓库 → 自动触发 `update-zip-list.yml`
+- **适用：** 线上代码备份、跨设备同步 Worker 源码
 
-勾选后，Wrangler 的完整输出日志（包括详细错误、部署地址等）将显示在 Actions 页面。自定义命令的输出**无论是否勾选调试模式都会显示**（命令执行结果需要可见才有意义）。
+### `update-zip-list.yml` — 维护下拉列表
+
+- **触发：** push `*.zip`（根目录）/ push `builds/*.zip`（fetch 归档后）/ 手动
+- **作用：** 扫描根目录 + `builds/` 所有 zip，自动更新 `deploy.yml` 的下拉选项
 
 ---
 
-## 项目类型自动识别
+## 自动触发链路
 
-Action 会自动读取 `wrangler.toml` 判断项目类型，无需手动配置：
-
-### Workers 项目
-
-`wrangler.toml` 中**不含** `pages_build_output_dir` 字段：
-
-```toml
-name = "my-worker"
-main = "src/index.js"
-compatibility_date = "2024-01-01"
 ```
+上传 zip → 根目录
+  ├── auto-deploy.yml      → 静默部署
+  └── update-zip-list.yml  → 更新下拉列表
 
-执行流程：`npm install（如有）` → `wrangler deploy`
-
-### Pages 项目
-
-`wrangler.toml` 中**含有** `pages_build_output_dir` 字段：
-
-```toml
-name = "my-pages-site"          # ← 必须填写
-pages_build_output_dir = "dist"  # ← 必须填写
+手动触发 fetch.yml
+  → 拉取 Worker 代码
+  → 归档 builds/xxx.zip（push）
+  └── update-zip-list.yml  → 自动更新下拉列表（含 builds/ 归档）
 ```
-
-执行流程：`npm install` → `npm run build（如有 build script）` → `wrangler pages deploy dist --project-name=my-pages-site`
-
-> ⚠️ Pages 项目必须在 `wrangler.toml` 中填写 `name` 字段，否则部署会报错提示。
 
 ---
 
-## 两个 Workflow 的关系说明
+## 网页控制台功能
 
-推送 zip 文件时，两个 workflow **完全并行运行，互不依赖**：
+控制台部署在 Cloudflare Worker 上，解决国内访问 GitHub API 慢的问题（所有请求通过 Worker 代理）。
 
-```
-push *.zip
-  ├── deploy.yml         → 直接扫描文件系统找最新 zip → 部署
-  └── update-zip-list.yml → 更新 deploy.yml 的 options 列表
-                             （供下一次手动触发时的下拉菜单使用）
-```
-
-- `deploy.yml` 的**自动部署**直接扫描根目录文件，不依赖 options 列表
-- `update-zip-list.yml` 只修改 `.github/workflows/deploy.yml`，该路径不在 `*.zip` 监听范围内，不会循环触发
-- 两者同时失败互不影响对方
+| Tab | 功能 |
+|---|---|
+| 🚀 部署 | 拖拽文件夹或 zip，浏览器内打包上传，自动触发部署 |
+| 📦 版本管理 | 查看所有 zip，一键部署 / 回滚 / 下载 / 删除 |
+| ⚡ 命令执行 | 填写 wrangler 命令，触发 `command.yml` |
+| ☁ 拉取归档 | 输入 Worker 名称拉取代码，查看 builds/ 归档列表 |
+| 📋 运行记录 | 实时查看 GitHub Actions 运行状态和完整日志 |
 
 ---
 
 ## 常见问题
 
-**Q：为什么静默模式下部署失败只显示退出码，没有具体原因？**
+**Q：为什么需要 PAT，不能用 GITHUB_TOKEN？**
 
-A：静默模式将 Wrangler 所有输出重定向到 `/dev/null`，防止日志泄露部署地址、Token 相关信息。开启调试模式重跑即可看到完整错误。
+A：GitHub 硬性限制，`GITHUB_TOKEN` 永远无法修改 `.github/workflows/` 目录，任何 `permissions` 设置均无效。`update-zip-list.yml` 需要写入 `deploy.yml`，因此必须使用 PAT。
 
-**Q：`wrangler-command` 模式的命令怎么填写？**
+**Q：`fetch.yml` 拉取的是 TypeScript 源码还是编译产物？**
 
-A：每行填写一条完整的 wrangler 命令，且必须以 `wrangler ` 开头，否则会被安全校验拦截。例如 `wrangler d1 create my-db`、`wrangler vectorize create email-vectors --dimensions=768`。
+A：Cloudflare 存储的是 esbuild bundle 后的单文件 JS，不是 TypeScript 源码。拉取后的 `src/` 目录中是 bundle 产物，体积较大属正常现象。
 
-**Q：`wrangler-command` 模式和 `all` 模式的命令在哪个目录下执行？**
+**Q：手动触发时下拉菜单没有新文件？**
 
-A：统一在仓库根目录执行，不在解压后的项目目录内。这对 `d1 create`、`vectorize create` 等管理类命令没有影响，因为这些命令不依赖项目文件。
+A：`update-zip-list.yml` 在 push 后自动运行，通常需要几十秒。刚推送就立即触发手动部署时可能列表还未更新，稍等片刻再触发即可，或选择「自动选最新」选项。
 
-**Q：`all` 模式下命令执行失败，还会继续部署吗？**
+**Q：`builds/` 目录下的归档会触发自动部署吗？**
 
-A：不会。`all` 模式先执行命令步骤，命令失败后整个 workflow 会报错退出，不会进入后续的部署步骤。
+A：不会。`auto-deploy.yml` 只监听根目录 `*.zip`（`paths: - '*.zip'`），`builds/*.zip` 不在监听范围内，fetch 归档不会意外触发自动部署。
 
-**Q：`update-zip-list.yml` 的 commit 会再次触发 `deploy.yml` 吗？**
+**Q：Pages 项目如何部署？**
 
-A：不会。`deploy.yml` 只监听根目录 `*.zip` 文件变更，而 `update-zip-list.yml` 修改的是 `.github/workflows/deploy.yml`，路径不匹配，不会触发。
-
-**Q：手动触发时下拉菜单没有我新上传的压缩包？**
-
-A：`update-zip-list.yml` 在 push zip 后自动更新列表，通常几十秒内完成。如果刚推送就立即手动触发，可能列表还未更新。稍等片刻后再手动触发即可看到新文件。
-
-**Q：可以保留多个版本的压缩包用于回滚吗？**
-
-A：可以。仓库根目录的所有 zip 文件都会出现在手动触发的下拉菜单中，选择旧版本压缩包手动触发即可回滚。
-
-**Q：Pages 项目报错「缺少 name 字段」？**
-
-A：请在项目的 `wrangler.toml` 中添加 `name = "你的项目名"`，该名称需与 Cloudflare Dashboard 中的 Pages 项目名一致。
+A：`wrangler.toml` 中填写 `pages_build_output_dir` 字段即可，deploy workflow 会自动识别并执行 `npm run build` + `wrangler pages deploy`。

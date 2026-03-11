@@ -789,12 +789,15 @@
     /* ── Toast ───────────────────────────────────────────── */
     #toast-container {
       position: fixed;
-      bottom: 24px;
-      right: 24px;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 9999;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
     }
 
     .toast {
@@ -807,14 +810,15 @@
       border-radius: 10px;
       box-shadow: var(--shadow);
       font-size: 14px;
-      max-width: 360px;
-      animation: slideUp .25s ease;
+      max-width: 420px;
+      pointer-events: auto;
+      animation: slideDown .22s ease;
       transition: opacity .3s;
     }
 
-    @keyframes slideUp {
-      from { transform: translateY(20px); opacity: 0; }
-      to   { transform: translateY(0);    opacity: 1; }
+    @keyframes slideDown {
+      from { transform: translateY(-16px); opacity: 0; }
+      to   { transform: translateY(0);     opacity: 1; }
     }
 
     .toast.success { border-left: 3px solid var(--success); }
@@ -2117,6 +2121,29 @@
       }
     }
 
+    function renderZipItem(f) {
+      const sid = f.sha.substring(0, 8);
+      return '<div class="version-item" id="ver-' + sid + '">' +
+        '<div class="version-info">' +
+          '<div class="version-icon">🗜️</div>' +
+          '<div class="version-meta">' +
+            '<div class="version-name">' + f.name + '</div>' +
+            '<div class="version-detail">' + formatSize(f.size) + ' · ' + f.source + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="version-actions">' +
+          '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + f.download_url + '\')">⬇ 下载</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
+          '<label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">' +
+            '<input type="checkbox" id="dbg-' + sid + '">' +
+            '<span class="debug-toggle-track"></span>' +
+            '<span class="debug-toggle-label">调试模式</span>' +
+          '</label>' +
+        '</div>' +
+      '</div>';
+    }
+
     function renderVersionsList(zips) {
       const el = document.getElementById('versions-list');
       if (!zips.length) {
@@ -2124,28 +2151,7 @@
         return;
       }
       el.innerHTML = '<div class="version-list" style="padding:12px;">' +
-        zips.map(f => {
-          const sid = f.sha.substring(0,8);
-          return '<div class="version-item" id="ver-' + sid + '">' +
-            '<div class="version-info">' +
-              '<div class="version-icon">🗜️</div>' +
-              '<div class="version-meta">' +
-                '<div class="version-name">' + f.name + '</div>' +
-                '<div class="version-detail">' + formatSize(f.size) + ' · ' + f.source + '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="version-actions">' +
-              '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
-              '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + f.download_url + '\')">⬇ 下载</button>' +
-              '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
-              '<label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">' +
-                '<input type="checkbox" id="dbg-' + sid + '">' +
-                '<span class="debug-toggle-track"></span>' +
-                '<span class="debug-toggle-label">调试模式</span>' +
-              '</label>' +
-            '</div>' +
-          '</div>';
-        }).join('') +
+        zips.map(renderZipItem).join('') +
       '</div>';
     }
 
@@ -2157,22 +2163,7 @@
         return;
       }
       el.innerHTML = '<div class="version-list" style="padding:4px 0;">' +
-        buildsZips.map(f => {
-          const sid = f.sha.substring(0,8);
-          return '<div class="version-item" id="ver-' + sid + '" style="padding:8px 0;">' +
-            '<div class="version-info">' +
-              '<div class="version-icon" style="font-size:16px;">🗜️</div>' +
-              '<div class="version-meta">' +
-                '<div class="version-name" style="font-size:13px;">' + f.name + '</div>' +
-                '<div class="version-detail">' + formatSize(f.size) + '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="version-actions">' +
-              '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
-              '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑</button>' +
-            '</div>' +
-          '</div>';
-        }).join('') +
+        buildsZips.map(renderZipItem).join('') +
       '</div>';
     }
 

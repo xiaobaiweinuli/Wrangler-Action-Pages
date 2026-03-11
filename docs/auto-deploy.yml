@@ -1,32 +1,18 @@
-name: 🚀 手动部署
+name: 🤖 自动部署（Push 触发）
 
 # ────────────────────────────────────────────────────────────
-# 触发条件：仅手动触发
-# 下拉选项由 update-zip-list.yml 自动维护
-# 支持根目录 zip 和 builds/ 归档，可手动输入完整路径
+# 触发条件：推送 zip 文件到仓库根目录时自动运行
+# 逻辑：自动选取根目录中 git 提交时间最新的 zip 进行部署
 # ────────────────────────────────────────────────────────────
 
 on:
-  workflow_dispatch:
-    inputs:
-      zip_file:
-        description: '选择压缩包（可手动输入 builds/xxx.zip）'
-        required: true
-        default: '自动选最新'
-        type: choice
-        options:
-          - 自动选最新
-          - 邮件监控项目测试.zip
-          - builds/xingshuang-pro-20260311-170422.zip
-      debug_mode:
-        description: '调试模式（显示完整 Wrangler 日志）'
-        required: false
-        default: false
-        type: boolean
+  push:
+    paths:
+      - '*.zip'
 
 jobs:
-  deploy:
-    name: 手动部署压缩包
+  auto-deploy:
+    name: 自动部署最新压缩包
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -50,42 +36,31 @@ jobs:
           npm install -g wrangler > /dev/null 2>&1
           echo "✅ $(wrangler --version) 安装完成"
 
-      # ── 4. 确定目标压缩包 ─────────────────────────────────
-      # 支持：下拉选项、手动输入路径（含 builds/ 前缀）、自动选最新
-      - name: 🔍 确定目标压缩包
+      # ── 4. 自动选根目录最新 zip ───────────────────────────
+      - name: 🔍 选取最新压缩包
         id: find-zip
         run: |
-          SELECTED="${{ github.event.inputs.zip_file }}"
-
-          if [ -n "$SELECTED" ] && [ "$SELECTED" != "自动选最新" ]; then
-            if [ ! -f "$SELECTED" ]; then
-              echo "❌ 指定的压缩包不存在：$SELECTED"
-              exit 1
+          # 按 git 提交时间降序，只扫根目录 *.zip
+          LATEST_ZIP=""
+          declare -A seen_files
+          while IFS= read -r f; do
+            f=$(echo "$f" | tr -d '\r')
+            if [[ "$f" == *.zip ]] && [[ -f "$f" ]] && [[ -z "${seen_files[$f]+x}" ]]; then
+              seen_files["$f"]=1
+              [ -z "$LATEST_ZIP" ] && LATEST_ZIP="$f"
             fi
-            echo "📦 使用指定压缩包：$SELECTED"
-            echo "zip_file=$SELECTED" >> "$GITHUB_OUTPUT"
-          else
-            # 自动选最新：只扫根目录（手动触发语义）
-            LATEST_ZIP=""
-            declare -A seen_files
-            while IFS= read -r f; do
-              f=$(echo "$f" | tr -d '\r')
-              if [[ "$f" == *.zip ]] && [[ -f "$f" ]] && [[ -z "${seen_files[$f]+x}" ]]; then
-                seen_files["$f"]=1
-                [ -z "$LATEST_ZIP" ] && LATEST_ZIP="$f"
-              fi
-            done < <(git log --name-only --format="" -- "*.zip" 2>/dev/null)
+          done < <(git log --name-only --format="" -- "*.zip" 2>/dev/null)
 
-            [ -z "$LATEST_ZIP" ] && LATEST_ZIP=$(ls -t *.zip 2>/dev/null | head -1)
+          # 兜底：按文件系统时间排序
+          [ -z "$LATEST_ZIP" ] && LATEST_ZIP=$(ls -t *.zip 2>/dev/null | head -1)
 
-            if [ -z "$LATEST_ZIP" ]; then
-              echo "❌ 根目录未找到任何 .zip 文件"
-              exit 1
-            fi
-
-            echo "📦 自动选择最新：$LATEST_ZIP"
-            echo "zip_file=$LATEST_ZIP" >> "$GITHUB_OUTPUT"
+          if [ -z "$LATEST_ZIP" ]; then
+            echo "❌ 根目录未找到任何 .zip 文件"
+            exit 1
           fi
+
+          echo "📦 自动选择：$LATEST_ZIP"
+          echo "zip_file=$LATEST_ZIP" >> "$GITHUB_OUTPUT"
 
       # ── 5. 解压 ───────────────────────────────────────────
       - name: 📂 解压压缩包
@@ -104,7 +79,7 @@ jobs:
           [ -z "$CFG" ] && CFG=$(find "$EXTRACT_DIR" -maxdepth 3 -name "wrangler.json" 2>/dev/null | head -1)
 
           if [ -z "$CFG" ]; then
-            echo "❌ 未找到 wrangler 配置文件（wrangler.toml / wrangler.jsonc / wrangler.json）"
+            echo "❌ 未找到 wrangler 配置文件"
             exit 1
           fi
 
@@ -138,29 +113,15 @@ jobs:
             fi
           fi
 
-      # ── 8. 部署（调试模式）───────────────────────────────
-      - name: 🚀 部署到 Cloudflare（调试模式）
-        if: github.event.inputs.debug_mode == 'true'
-        run: |
-          cd "${{ steps.extract.outputs.project_dir }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  🐛 调试模式，完整日志如下"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      # ── 9. 部署（静默模式）───────────────────────────────
-      - name: 🚀 部署到 Cloudflare（静默模式）
-        if: github.event.inputs.debug_mode != 'true'
+      # ── 8. 部署（静默）───────────────────────────────────
+      - name: 🚀 部署到 Cloudflare
         run: |
           cd "${{ steps.extract.outputs.project_dir }}"
           wrangler deploy > /dev/null 2>&1
           if [ $? -eq 0 ]; then
             echo "✅ 部署成功"
           else
-            echo "❌ 部署失败（勾选调试模式重新运行可查看详细日志）"
+            echo "❌ 部署失败，请手动触发并开启调试模式查看详情"
             exit 1
           fi
         env:

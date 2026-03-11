@@ -1,0 +1,104 @@
+name: ⚡ 执行 Wrangler 命令
+
+# ────────────────────────────────────────────────────────────
+# 触发条件：仅手动触发
+# 每行一条 wrangler 命令，安全校验后逐条执行
+# 适用于：创建 D1、KV、R2、Vectorize 等资源，无需本地环境
+# ────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      wrangler_cmd:
+        description: '每行一条 wrangler 命令（必须以 wrangler 开头）'
+        required: true
+        type: string
+      debug_mode:
+        description: '调试模式（显示完整输出）'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  run-command:
+    name: 执行 Wrangler 命令
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+
+      # ── 1. 检出仓库 ───────────────────────────────────────
+      - name: 📥 检出仓库
+        uses: actions/checkout@v4
+
+      # ── 2. 配置 Node.js ───────────────────────────────────
+      - name: ⚙️ 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── 3. 安装 Wrangler ──────────────────────────────────
+      - name: 📦 安装 Wrangler CLI
+        run: |
+          npm install -g wrangler > /dev/null 2>&1
+          echo "✅ $(wrangler --version) 安装完成"
+
+      # ── 4. 逐条执行命令 ───────────────────────────────────
+      - name: ⚡ 执行 Wrangler 命令
+        run: |
+          RAW="${{ github.event.inputs.wrangler_cmd }}"
+
+          if [ -z "$RAW" ]; then
+            echo "❌ 未输入任何命令"
+            exit 1
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ⚡ 开始执行 Wrangler 命令"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          FAILED=0
+          LINE_NUM=0
+
+          while IFS= read -r line; do
+            line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -z "$line" ] && continue
+            [[ "$line" == \#* ]] && continue
+
+            # 安全校验：只允许 wrangler 开头
+            if [[ ! "$line" =~ ^wrangler[[:space:]] ]]; then
+              echo "❌ 命令被拒绝（仅允许 wrangler 命令）：$line"
+              exit 1
+            fi
+
+            LINE_NUM=$((LINE_NUM + 1))
+            echo ""
+            echo "▶ 命令 $LINE_NUM：$line"
+            echo "────────────────────────────────"
+
+            if [ "${{ github.event.inputs.debug_mode }}" = "true" ]; then
+              eval "$line"
+            else
+              eval "$line" 2>&1
+            fi
+            CMD_EXIT=$?
+
+            if [ $CMD_EXIT -ne 0 ]; then
+              echo "❌ 命令 $LINE_NUM 失败（退出码：$CMD_EXIT）"
+              FAILED=$((FAILED + 1))
+            else
+              echo "✅ 命令 $LINE_NUM 成功"
+            fi
+          done <<< "$RAW"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ 共 $LINE_NUM 条命令，$FAILED 条失败"
+            exit 1
+          else
+            echo "✅ 共 $LINE_NUM 条命令，全部成功"
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
