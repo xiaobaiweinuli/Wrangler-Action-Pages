@@ -610,8 +610,10 @@
 
     .version-item {
       display: flex;
-      flex-direction: column;
-      padding: 14px 16px;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
       background: var(--bg-input);
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -649,9 +651,16 @@
 
     .version-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      flex-shrink: 0;
+    }
+
+    .version-actions .btn-sm {
+      padding: 4px 9px;
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     /* ── Commands Tab ────────────────────────────────────── */
