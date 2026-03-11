@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CF Deploy — Cloudflare 部署控制台</title>
-  <meta name="description" content="无需命令行，通过浏览器直接部署 Cloudflare Workers / Pages。支持手机、ARM 设备，内置 GitHub Actions 自动化，文件夹打包上传一键触发部署。">
-  <link rel="canonical" href="https://cf-deploy.workers.dev/">
+  <title>CF Deploy — Cloudflare Workers 部署与拉取控制台</title>
+  <meta name="description" content="无需命令行，通过浏览器一键部署或拉取 Cloudflare Workers / Pages。支持手机、ARM 设备，内置 GitHub Actions 自动化，可将线上 Worker 归档回本地版本库。">
+  <link rel="canonical" href="https://wrangler-action.bxiao.workers.dev/">
 
   <!-- Open Graph -->
   <meta property="og:type"        content="website">
-  <meta property="og:url"         content="https://cf-deploy.workers.dev/">
-  <meta property="og:title"       content="CF Deploy — Cloudflare 部署控制台">
-  <meta property="og:description" content="无需命令行，通过浏览器直接部署 Cloudflare Workers / Pages。支持手机、ARM 设备，内置 GitHub Actions 自动化。">
-  <meta property="og:image"       content="https://cf-deploy.workers.dev/og-image.png">
+  <meta property="og:url"         content="https://wrangler-action.bxiao.workers.dev/">
+  <meta property="og:title"       content="CF Deploy — Cloudflare Workers 部署与拉取控制台">
+  <meta property="og:description" content="无需命令行，通过浏览器一键部署或拉取 Cloudflare Workers / Pages。支持手机、ARM 设备，内置 GitHub Actions 自动化。">
+  <meta property="og:image"       content="https://wrangler-action.bxiao.workers.dev/og-image.png">
   <meta name="twitter:card"       content="summary">
-  <meta name="twitter:title"      content="CF Deploy — Cloudflare 部署控制台">
-  <meta name="twitter:description" content="无需命令行，通过浏览器直接部署 Cloudflare Workers / Pages。">
+  <meta name="twitter:title"      content="CF Deploy — Cloudflare Workers 部署与拉取控制台">
+  <meta name="twitter:description" content="无需命令行，部署或拉取 Cloudflare Workers / Pages，支持手机 / ARM 设备。">
 
   <!-- JSON-LD 结构化数据 -->
   <script type="application/ld+json">
@@ -23,17 +23,20 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "CF Deploy",
-    "alternateName": "Cloudflare 部署控制台",
-    "description": "无需命令行，通过浏览器直接部署 Cloudflare Workers / Pages。支持手机、ARM 设备，内置 GitHub Actions 自动化，文件夹打包上传一键触发部署。",
+    "url": "https://wrangler-action.bxiao.workers.dev/",
+    "alternateName": "Cloudflare Workers 部署控制台",
+    "description": "无需命令行，通过浏览器一键部署或拉取 Cloudflare Workers / Pages。支持手机、ARM 设备，内置 GitHub Actions 自动化，可将线上 Worker 代码归档为版本化 ZIP 存入仓库。",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Web",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
     "featureList": [
-      "浏览器内打包文件夹为 ZIP 上传",
-      "通过 GitHub Actions 触发 Cloudflare 部署",
-      "版本管理与一键回滚",
-      "内联查看 GitHub Actions 日志",
-      "支持手机 / ARM 设备"
+      "浏览器内打包文件夹为 ZIP 并上传部署",
+      "从 Cloudflare Dashboard 拉取 Worker 代码归档",
+      "通过 GitHub Actions 触发 Wrangler 部署",
+      "版本管理、一键回滚、ZIP 下载",
+      "内联查看 GitHub Actions 完整日志",
+      "执行任意 wrangler 命令（D1 / KV / R2 / Vectorize）",
+      "支持手机 / ARM 设备，无需 Wrangler CLI 本地环境"
     ]
   }
   </script>
@@ -770,7 +773,17 @@
       font-family: 'JetBrains Mono', monospace;
     }
 
-    .spinning { animation: spin 1s linear infinite; display: inline-block; }
+    .spinning {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Toast ───────────────────────────────────────────── */
@@ -1126,7 +1139,7 @@
         <button class="btn btn-ghost btn-sm" id="log-next-btn" onclick="navMatch(1)"  style="display:none;">↓</button>
       </div>
       <div class="log-body" id="log-body">
-        <div class="log-loading"><span class="spinning">⟳</span> 加载日志中...</div>
+        <div class="log-loading"><span class="spinning"></span> 加载日志中...</div>
       </div>
     </div>
   </div>
@@ -1329,7 +1342,7 @@
           <div class="card-body" style="padding:0;">
             <div id="versions-list">
               <div class="loading-row">
-                <span class="spinning">⟳</span> 加载中...
+                <span class="spinning"></span> 加载中...
               </div>
             </div>
           </div>
@@ -1402,6 +1415,19 @@
 
           </div>
         </div>
+
+        <!-- builds/ 归档列表 -->
+        <div class="card" style="margin-top:16px;">
+          <div class="card-header">
+            <div class="card-title">☁ 已归档版本（builds/）</div>
+            <button class="btn btn-ghost btn-sm" onclick="loadVersions()" title="刷新列表">🔄</button>
+          </div>
+          <div class="card-body" style="padding-top:4px;">
+            <div id="fetch-builds-list">
+              <p style="font-size:13px;color:var(--text-muted);">连接仓库后自动加载</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Runs Panel -->
@@ -1413,7 +1439,7 @@
           </div>
           <div id="runs-list" style="padding:0;">
             <div class="loading-row">
-              <span class="spinning">⟳</span> 加载中...
+              <span class="spinning"></span> 加载中...
             </div>
           </div>
         </div>
@@ -1589,7 +1615,7 @@
 
       const btn = document.getElementById('fetch-repos-btn');
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinning">⟳</span>';
+      btn.innerHTML = '<span class="spinning"></span>';
 
       try {
         const tempPat = pat;
@@ -1929,18 +1955,18 @@
         // 步骤 1：打包
         if (state.pendingBlob.type === 'fsa') {
           // File System Access API：entries 已含完整路径
-          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包文件夹中...');
+          setStep('pack', 'active', '<span class="spinning"></span>', '打包文件夹中...');
           zipBlob = await packFsaEntries(state.pendingBlob.entries);
           document.getElementById('file-size').textContent = formatSize(zipBlob.size);
         } else if (state.pendingBlob.type === 'folder') {
           // webkitdirectory：webkitRelativePath 含完整路径
-          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包文件夹中...');
+          setStep('pack', 'active', '<span class="spinning"></span>', '打包文件夹中...');
           zipBlob = await packFolder(state.pendingBlob.files);
           document.getElementById('file-size').textContent = formatSize(zipBlob.size);
         } else if (state.pendingBlob.type === 'multi') {
           // 多文件降级：用用户填写的文件夹名作为 zip 内路径前缀
           const folderPrefix = document.getElementById('folder-name-input').value.trim() || 'project';
-          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包文件中...');
+          setStep('pack', 'active', '<span class="spinning"></span>', '打包文件中...');
           zipBlob = await packFolder(state.pendingBlob.files, folderPrefix);
           document.getElementById('file-size').textContent = formatSize(zipBlob.size);
         } else {
@@ -1960,7 +1986,7 @@
         setPackProgress(100);
 
         // 步骤 2：上传
-        setStep('upload', 'active', '<span class="spinning">⟳</span>', '上传到 GitHub...');
+        setStep('upload', 'active', '<span class="spinning"></span>', '上传到 GitHub...');
         await uploadToGitHub(zipBlob, filename);
         setStep('upload', 'done', '✅', '已上传：' + filename);
 
@@ -1990,7 +2016,7 @@
       return zip.generateAsync(
         { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
         (meta) => {
-          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包中 ' + Math.round(meta.percent) + '%...');
+          setStep('pack', 'active', '<span class="spinning"></span>', '打包中 ' + Math.round(meta.percent) + '%...');
           setPackProgress(meta.percent);
         }
       );
@@ -2009,7 +2035,7 @@
       return zip.generateAsync(
         { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
         (meta) => {
-          setStep('pack', 'active', '<span class="spinning">⟳</span>', '打包中 ' + Math.round(meta.percent) + '%...');
+          setStep('pack', 'active', '<span class="spinning"></span>', '打包中 ' + Math.round(meta.percent) + '%...');
           setPackProgress(meta.percent);
         }
       );
@@ -2063,74 +2089,96 @@
     // ═══════════════════════════════════════════════
     async function loadVersions() {
       const el = document.getElementById('versions-list');
-      el.innerHTML = '<div class="loading-row"><span class="spinning">⟳</span> 加载中...</div>';
+      el.innerHTML = '<div class="loading-row"><span class="spinning"></span> 加载中...</div>';
 
       try {
-        // 同时请求根目录和 builds/ 目录
         const [rootContents, buildsContents] = await Promise.all([
           gh('/repos/' + state.repo + '/contents/'),
           gh('/repos/' + state.repo + '/contents/builds').catch(() => [])
         ]);
 
-        // 根目录 zip：path = 文件名，source = '📤 上传'
         const rootZips = rootContents
           .filter(f => f.name.endsWith('.zip'))
           .map(f => ({ ...f, path: f.name, source: '📤 上传' }));
 
-        // builds/ 目录 zip：path = builds/文件名，source = '☁ 从 CF 拉取'
         const buildsZips = Array.isArray(buildsContents)
           ? buildsContents
               .filter(f => f.name.endsWith('.zip'))
               .map(f => ({ ...f, path: 'builds/' + f.name, source: '☁ 从 CF 拉取' }))
           : [];
 
-        // 合并，按名称排序
         const zips = [...rootZips, ...buildsZips].sort((a, b) => b.name.localeCompare(a.name));
-
-        // 同步更新命令 Tab 的下拉框
         updateCmdZipSelect(zips);
-
-        if (!zips.length) {
-          el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>仓库根目录和 builds/ 目录暂无 .zip 文件<br>在「部署」标签上传你的第一个项目</p></div>';
-          return;
-        }
-
-        el.innerHTML = '<div class="version-list" style="padding:12px;">' +
-          zips.map(f => {
-            const sid = f.sha.substring(0,8);
-            return '<div class="version-item" id="ver-' + sid + '">' +
-              '<div class="version-info">' +
-                '<div class="version-icon">🗜️</div>' +
-                '<div class="version-meta">' +
-                  '<div class="version-name">' + f.name + '</div>' +
-                  '<div class="version-detail">' + formatSize(f.size) + ' · ' + f.source + (f._time ? ' · ' + f._time : '') + '</div>' +
-                '</div>' +
-              '</div>' +
-              '<div class="version-actions">' +
-                '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
-                '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + f.download_url + '\')">⬇ 下载</button>' +
-                '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
-                '<label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">' +
-                  '<input type="checkbox" id="dbg-' + sid + '">' +
-                  '<span class="debug-toggle-track"></span>' +
-                  '<span class="debug-toggle-label">调试模式</span>' +
-                '</label>' +
-              '</div>' +
-            '</div>';
-          }).join('') +
-        '</div>';
+        renderVersionsList(zips);
+        renderFetchBuilds(buildsZips);
 
       } catch (e) {
         el.innerHTML = '<div class="empty-state"><p>加载失败：' + e.message + '</p></div>';
       }
     }
 
-    // zip 下拉数据缓存（供渲染用）
-    let _zipList = [];
-
-    function updateCmdZipSelect(zips) {
-      _zipList = zips; // 保留供其他地方引用
+    function renderVersionsList(zips) {
+      const el = document.getElementById('versions-list');
+      if (!zips.length) {
+        el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>仓库根目录和 builds/ 目录暂无 .zip 文件<br>在「部署」标签上传你的第一个项目</p></div>';
+        return;
+      }
+      el.innerHTML = '<div class="version-list" style="padding:12px;">' +
+        zips.map(f => {
+          const sid = f.sha.substring(0,8);
+          return '<div class="version-item" id="ver-' + sid + '">' +
+            '<div class="version-info">' +
+              '<div class="version-icon">🗜️</div>' +
+              '<div class="version-meta">' +
+                '<div class="version-name">' + f.name + '</div>' +
+                '<div class="version-detail">' + formatSize(f.size) + ' · ' + f.source + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="version-actions">' +
+              '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
+              '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + f.download_url + '\')">⬇ 下载</button>' +
+              '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
+              '<label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">' +
+                '<input type="checkbox" id="dbg-' + sid + '">' +
+                '<span class="debug-toggle-track"></span>' +
+                '<span class="debug-toggle-label">调试模式</span>' +
+              '</label>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
     }
+
+    function renderFetchBuilds(buildsZips) {
+      const el = document.getElementById('fetch-builds-list');
+      if (!el) return;
+      if (!buildsZips.length) {
+        el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);padding:4px 0;">暂无归档，拉取后将在此显示</p>';
+        return;
+      }
+      el.innerHTML = '<div class="version-list" style="padding:4px 0;">' +
+        buildsZips.map(f => {
+          const sid = f.sha.substring(0,8);
+          return '<div class="version-item" id="ver-' + sid + '" style="padding:8px 0;">' +
+            '<div class="version-info">' +
+              '<div class="version-icon" style="font-size:16px;">🗜️</div>' +
+              '<div class="version-meta">' +
+                '<div class="version-name" style="font-size:13px;">' + f.name + '</div>' +
+                '<div class="version-detail">' + formatSize(f.size) + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="version-actions">' +
+              '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
+              '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑</button>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }
+
+    // zip 下拉数据缓存
+    let _zipList = [];
+    function updateCmdZipSelect(zips) { _zipList = zips; }
 
     async function deployVersion(filepath) {
       const debugId = filepath.replace(/[^a-z0-9]/gi, '').substring(0, 8);
@@ -2164,6 +2212,15 @@
       const ok = await confirm('确认删除', '删除 ' + filename + '？此操作不可恢复。');
       if (!ok) return;
 
+      // 立即从列表移除，提升体验
+      const sid = sha.substring(0, 8);
+      const el = document.getElementById('ver-' + sid);
+      if (el) {
+        el.style.transition = 'opacity 0.2s';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 200);
+      }
+
       try {
         await gh('/repos/' + state.repo + '/contents/' + filename, {
           method: 'DELETE',
@@ -2174,10 +2231,33 @@
           }),
         });
         toast('已删除 ' + filename, 'success');
-        loadVersions();
+        // 后台静默刷新（不显示 loading 态）
+        loadVersionsSilent();
       } catch (e) {
+        // 请求失败则恢复显示
+        if (el) { el.style.opacity = '1'; }
         toast('删除失败：' + e.message, 'error');
       }
+    }
+
+    // 静默刷新版本列表（不重置 loading 状态）
+    async function loadVersionsSilent() {
+      try {
+        const [rootContents, buildsContents] = await Promise.all([
+          gh('/repos/' + state.repo + '/contents/'),
+          gh('/repos/' + state.repo + '/contents/builds').catch(() => [])
+        ]);
+        const rootZips = rootContents
+          .filter(f => f.name.endsWith('.zip'))
+          .map(f => ({ ...f, path: f.name, source: '📤 上传' }));
+        const buildsZips = Array.isArray(buildsContents)
+          ? buildsContents.filter(f => f.name.endsWith('.zip'))
+              .map(f => ({ ...f, path: 'builds/' + f.name, source: '☁ 从 CF 拉取' }))
+          : [];
+        const zips = [...rootZips, ...buildsZips].sort((a, b) => b.name.localeCompare(a.name));
+        renderVersionsList(zips);
+        renderFetchBuilds(buildsZips);
+      } catch (_) {}
     }
 
     // ═══════════════════════════════════════════════
@@ -2271,7 +2351,7 @@
 
     function statusBadge(status, conclusion) {
       if (status === 'queued')        return '<span class="badge badge-muted">⏳ 排队</span>';
-      if (status === 'in_progress')   return '<span class="badge badge-info"><span class="spinning">⟳</span> 运行中</span>';
+      if (status === 'in_progress')   return '<span class="badge badge-info"><span class="spinning"></span> 运行中</span>';
       if (conclusion === 'success')   return '<span class="badge badge-success">✅ 成功</span>';
       if (conclusion === 'failure')   return '<span class="badge badge-error">❌ 失败</span>';
       if (conclusion === 'cancelled') return '<span class="badge badge-muted">⊘ 取消</span>';
@@ -2331,8 +2411,8 @@
       }
 
       // ── 首次打开：需要请求 ──────────────────────────
-      document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:4px 0;"><span class="spinning">⟳</span> 加载 Jobs...</span>';
-      document.getElementById('log-body').innerHTML     = '<div class="log-loading"><span class="spinning">⟳</span> 加载中...</div>';
+      document.getElementById('log-jobs-bar').innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:4px 0;"><span class="spinning"></span> 加载 Jobs...</span>';
+      document.getElementById('log-body').innerHTML     = '<div class="log-loading"><span class="spinning"></span> 加载中...</div>';
 
       try {
         const data = await gh('/repos/' + state.repo + '/actions/runs/' + runId + '/jobs');
@@ -2359,7 +2439,7 @@
       document.getElementById('log-jobs-bar').innerHTML = logState.jobs.map(j => {
         const icon = j.conclusion === 'success' ? '✅'
           : j.conclusion === 'failure' ? '❌'
-          : j.status === 'in_progress' ? '⟳'
+          : j.status === 'in_progress' ? '<span class="spinning"></span>'
           : '⏸';
         return `<button class="log-job-btn" id="log-job-${j.id}" onclick="loadJobLog(logState.jobs.find(x=>x.id===${j.id}))">${icon} ${escHtml(j.name)}</button>`;
       }).join('');
@@ -2383,7 +2463,7 @@
         return;
       }
 
-      document.getElementById('log-body').innerHTML = '<div class="log-loading"><span class="spinning">⟳</span> 加载日志中...</div>';
+      document.getElementById('log-body').innerHTML = '<div class="log-loading"><span class="spinning"></span> 加载日志中...</div>';
 
       try {
         const res = await fetch('/api/github/repos/' + state.repo + '/actions/jobs/' + job.id + '/logs', {
@@ -2527,7 +2607,7 @@
       const startTime = Date.now();
 
       // 刷新按钮变为旋转动画，表示正在轮询
-      btn.innerHTML  = '<span class="spinning">⟳</span>';
+      btn.innerHTML  = '<span class="spinning"></span>';
       btn.disabled   = true;
       btn.title      = '部署进行中，自动刷新中...';
 
