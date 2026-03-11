@@ -708,8 +708,7 @@
     }
 
     /* ── Zip file select for commands ────────────────────── */
-    #cmd-zip-row { display: none; margin-bottom: 16px; }
-    #cmd-zip-row.visible { display: block; }
+    #cmd-zip-row { display: none; }
 
     /* ── Runs Panel ──────────────────────────────────────── */
     #runs-panel { margin-top: 24px; }
@@ -1221,6 +1220,9 @@
         <button class="tab-btn" onclick="switchTab('commands')" id="tab-btn-commands">
           ⚡ <span class="tab-label">命令执行</span>
         </button>
+        <button class="tab-btn" onclick="switchTab('fetch')" id="tab-btn-fetch">
+          ☁ <span class="tab-label">拉取归档</span>
+        </button>
       </div>
 
       <!-- 部署 Tab -->
@@ -1342,35 +1344,8 @@
           </div>
           <div class="card-body">
 
-            <!-- Mode chips -->
-            <div style="margin-bottom:12px;">
-              <div class="form-label" style="margin-bottom:8px;">运行模式</div>
-              <div class="cmd-mode-row">
-                <div class="mode-chip active" data-mode="wrangler-command" onclick="selectMode(this)">wrangler-command</div>
-                <div class="mode-chip" data-mode="deploy" onclick="selectMode(this)">deploy</div>
-                <div class="mode-chip" data-mode="all" onclick="selectMode(this)">all</div>
-              </div>
-            </div>
-
-            <!-- ZIP select (for deploy / all mode) -->
-            <div id="cmd-zip-row">
-              <div class="form-label" style="margin-bottom:6px;">选择压缩包</div>
-              <div class="input-wrap">
-                <input
-                  type="text"
-                  id="cmd-zip-input"
-                  class="form-input mono"
-                  placeholder="自动选最新"
-                  readonly
-                  style="cursor:pointer;"
-                  onclick="toggleZipDropdown()"
-                >
-                <div class="repo-dropdown" id="cmd-zip-dropdown"></div>
-              </div>
-            </div>
-
             <!-- Commands textarea -->
-            <div id="cmd-textarea-row" style="margin-bottom:14px;">
+            <div style="margin-bottom:14px;">
               <div class="form-label" style="margin-bottom:6px;">Wrangler 命令（每行一条，必须以 wrangler 开头）</div>
               <textarea
                 id="cmd-input"
@@ -1383,14 +1358,47 @@
             </div>
 
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-              <button class="btn btn-primary" onclick="triggerWorkflow()">▶ 执行</button>
+              <button class="btn btn-primary" onclick="triggerCommand()">▶ 执行</button>
               <label class="debug-toggle" title="开启后 Wrangler 完整日志将输出到 GitHub Actions">
                 <input type="checkbox" id="cmd-debug-check" onchange="toggleDebugHint('cmd-debug-hint',this)">
                 <span class="debug-toggle-track"></span>
                 <span class="debug-toggle-label">调试模式</span>
               </label>
             </div>
-            <div class="debug-hint" id="cmd-debug-hint">开启后 Wrangler 完整日志将输出到 GitHub Actions，部署出错时建议开启</div>
+            <div class="debug-hint" id="cmd-debug-hint">开启后 Wrangler 完整日志将输出到 GitHub Actions，出错时建议开启</div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- 拉取归档 Tab -->
+      <div class="tab-content" id="tab-fetch">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">☁ 从 Cloudflare 拉取 Worker</div>
+          </div>
+          <div class="card-body">
+
+            <div style="margin-bottom:14px;">
+              <div class="form-label" style="margin-bottom:6px;">Worker 名称</div>
+              <input
+                type="text"
+                id="fetch-worker-name"
+                class="form-input"
+                placeholder="在 Cloudflare Dashboard 上显示的 Worker 名称"
+              >
+              <div class="form-hint">拉取成功后将打包为 zip 存入 builds/ 目录，并自动更新版本管理列表。</div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <button class="btn btn-primary" onclick="triggerFetch()">☁ 开始拉取</button>
+              <label class="debug-toggle" title="开启后输出详细日志">
+                <input type="checkbox" id="fetch-debug-check" onchange="toggleDebugHint('fetch-debug-hint',this)">
+                <span class="debug-toggle-track"></span>
+                <span class="debug-toggle-label">调试模式</span>
+              </label>
+            </div>
+            <div class="debug-hint" id="fetch-debug-hint">开启后将输出拉取过程的详细日志到 GitHub Actions</div>
 
           </div>
         </div>
@@ -1961,6 +1969,7 @@
         toast('🎉 ' + filename + ' 上传成功，部署中...', 'success');
 
         clearFile();
+        state.lastWorkflow = 'auto-deploy.yml';
         setTimeout(() => { loadVersions(); startDeployPoll(); }, 2000);
 
       } catch (e) {
@@ -2057,43 +2066,58 @@
       el.innerHTML = '<div class="loading-row"><span class="spinning">⟳</span> 加载中...</div>';
 
       try {
-        const contents = await gh('/repos/' + state.repo + '/contents/');
-        const zips = contents.filter(f => f.name.endsWith('.zip')).sort((a, b) => a.name.localeCompare(b.name));
+        // 同时请求根目录和 builds/ 目录
+        const [rootContents, buildsContents] = await Promise.all([
+          gh('/repos/' + state.repo + '/contents/'),
+          gh('/repos/' + state.repo + '/contents/builds').catch(() => [])
+        ]);
+
+        // 根目录 zip：path = 文件名，source = '📤 上传'
+        const rootZips = rootContents
+          .filter(f => f.name.endsWith('.zip'))
+          .map(f => ({ ...f, path: f.name, source: '📤 上传' }));
+
+        // builds/ 目录 zip：path = builds/文件名，source = '☁ 从 CF 拉取'
+        const buildsZips = Array.isArray(buildsContents)
+          ? buildsContents
+              .filter(f => f.name.endsWith('.zip'))
+              .map(f => ({ ...f, path: 'builds/' + f.name, source: '☁ 从 CF 拉取' }))
+          : [];
+
+        // 合并，按名称排序
+        const zips = [...rootZips, ...buildsZips].sort((a, b) => b.name.localeCompare(a.name));
 
         // 同步更新命令 Tab 的下拉框
         updateCmdZipSelect(zips);
 
         if (!zips.length) {
-          el.innerHTML = `
-            <div class="empty-state">
-              <div class="empty-state-icon">📭</div>
-              <p>仓库根目录暂无 .zip 文件<br>在「部署」标签上传你的第一个项目</p>
-            </div>`;
+          el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>仓库根目录和 builds/ 目录暂无 .zip 文件<br>在「部署」标签上传你的第一个项目</p></div>';
           return;
         }
 
         el.innerHTML = '<div class="version-list" style="padding:12px;">' +
-          zips.map(f => `
-            <div class="version-item" id="ver-${f.sha.substring(0,8)}">
-              <div class="version-info">
-                <div class="version-icon">🗜️</div>
-                <div class="version-meta">
-                  <div class="version-name">${f.name}</div>
-                  <div class="version-detail">${formatSize(f.size)}${f._time ? ' · ' + f._time : ''}</div>
-                </div>
-              </div>
-              <div class="version-actions">
-                <button class="btn btn-secondary btn-sm" onclick="deployVersion('${f.name}','${f.sha.substring(0,8)}')">🚀 部署</button>
-                <button class="btn btn-secondary btn-sm" onclick="downloadVersion('${f.name}','${f.download_url}')">⬇ 下载</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteVersion('${f.name}','${f.sha}')">🗑 删除</button>
-                <label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">
-                  <input type="checkbox" id="dbg-${f.sha.substring(0,8)}">
-                  <span class="debug-toggle-track"></span>
-                  <span class="debug-toggle-label">调试模式</span>
-                </label>
-              </div>
-            </div>
-          `).join('') +
+          zips.map(f => {
+            const sid = f.sha.substring(0,8);
+            return '<div class="version-item" id="ver-' + sid + '">' +
+              '<div class="version-info">' +
+                '<div class="version-icon">🗜️</div>' +
+                '<div class="version-meta">' +
+                  '<div class="version-name">' + f.name + '</div>' +
+                  '<div class="version-detail">' + formatSize(f.size) + ' · ' + f.source + (f._time ? ' · ' + f._time : '') + '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="version-actions">' +
+                '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
+                '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + f.download_url + '\')">⬇ 下载</button>' +
+                '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
+                '<label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">' +
+                  '<input type="checkbox" id="dbg-' + sid + '">' +
+                  '<span class="debug-toggle-track"></span>' +
+                  '<span class="debug-toggle-label">调试模式</span>' +
+                '</label>' +
+              '</div>' +
+            '</div>';
+          }).join('') +
         '</div>';
 
       } catch (e) {
@@ -2105,50 +2129,15 @@
     let _zipList = [];
 
     function updateCmdZipSelect(zips) {
-      _zipList = zips;
-      renderZipDropdown();
+      _zipList = zips; // 保留供其他地方引用
     }
 
-    function renderZipDropdown() {
-      const dropdown = document.getElementById('cmd-zip-dropdown');
-      const input    = document.getElementById('cmd-zip-input');
-      const current  = input.dataset.value || '';
-
-      const items = [{ name: '', label: '✦ 自动选最新' }, ..._zipList.map(z => ({ name: z.name, label: z.name }))];
-
-      dropdown.innerHTML = items.map(item => `
-        <div
-          class="repo-dropdown-item${item.name === current ? ' selected' : ''}"
-          onclick="selectZip('${item.name}', '${item.label}')"
-          style="${item.name === current ? 'color:var(--accent);' : ''}"
-        >
-          <span>${item.label}</span>
-          ${item.name === current ? '<span style="color:var(--accent);font-size:13px;">✓</span>' : ''}
-        </div>
-      `).join('');
-    }
-
-    function toggleZipDropdown() {
-      const dropdown = document.getElementById('cmd-zip-dropdown');
-      const isOpen   = dropdown.classList.contains('open');
-      // 先关所有下拉
-      repoDropdown.classList.remove('open');
-      dropdown.classList.toggle('open', !isOpen);
-      if (!isOpen) renderZipDropdown();
-    }
-
-    function selectZip(value, label) {
-      const input = document.getElementById('cmd-zip-input');
-      input.dataset.value = value;
-      input.value         = value ? label : '';
-      input.placeholder   = value ? '' : '自动选最新';
-      document.getElementById('cmd-zip-dropdown').classList.remove('open');
-    }
-
-    async function deployVersion(filename) {
-      const debug = false;
-      await dispatchWorkflow({ mode: 'deploy', zip_file: filename, debug_mode: String(debug) });
-      toast('已触发部署：' + filename, 'success');
+    async function deployVersion(filepath) {
+      const debugId = filepath.replace(/[^a-z0-9]/gi, '').substring(0, 8);
+      const debug = document.getElementById('dbg-' + debugId)?.checked || false;
+      await dispatchWorkflow('deploy.yml', { zip_file: filepath, debug_mode: String(debug) });
+      state.lastWorkflow = 'deploy.yml';
+      toast('已触发部署：' + filepath, 'success');
       setTimeout(startDeployPoll, 1500);
     }
 
@@ -2194,52 +2183,47 @@
     // ═══════════════════════════════════════════════
     // 命令执行
     // ═══════════════════════════════════════════════
-    let currentMode = 'wrangler-command';
 
-    function selectMode(el) {
-      document.querySelectorAll('.mode-chip').forEach(c => c.classList.remove('active'));
-      el.classList.add('active');
-      currentMode = el.dataset.mode;
-
-      const showZip = currentMode === 'deploy' || currentMode === 'all';
-      const showCmd = currentMode === 'wrangler-command' || currentMode === 'all';
-      document.getElementById('cmd-zip-row').classList.toggle('visible', showZip);
-      document.getElementById('cmd-textarea-row').style.display = showCmd ? 'block' : 'none';
-    }
-
-    async function triggerWorkflow() {
+    async function triggerCommand() {
       const cmd   = document.getElementById('cmd-input').value.trim();
-      const zip   = document.getElementById('cmd-zip-input').dataset.value || '';
       const debug = document.getElementById('cmd-debug-check').checked;
 
-      if ((currentMode === 'wrangler-command' || currentMode === 'all') && !cmd) {
-        toast('请输入 wrangler 命令', 'error'); return;
-      }
-
-      const inputs = {
-        mode: currentMode,
-        debug_mode: String(debug),
-      };
-
-      if (currentMode !== 'wrangler-command') {
-        inputs.zip_file = zip || '自动选最新';
-      }
-
-      if (currentMode !== 'deploy') {
-        inputs.wrangler_cmd = cmd;
-      }
+      if (!cmd) { toast('请输入 wrangler 命令', 'error'); return; }
 
       try {
-        await dispatchWorkflow(inputs);
-        toast('✅ 已触发 workflow，请在「运行记录」查看进度', 'success');
+        await dispatchWorkflow('command.yml', {
+          wrangler_cmd: cmd,
+          debug_mode: String(debug),
+        });
+        toast('✅ 已触发命令执行，请在「运行记录」查看进度', 'success');
+        state.lastWorkflow = 'command.yml';
         setTimeout(startDeployPoll, 1500);
       } catch (e) {
         toast('触发失败：' + e.message, 'error');
       }
     }
 
-    async function dispatchWorkflow(inputs) {
-      await gh('/repos/' + state.repo + '/actions/workflows/deploy.yml/dispatches', {
+    async function triggerFetch() {
+      const workerName = document.getElementById('fetch-worker-name').value.trim();
+      const debug      = document.getElementById('fetch-debug-check').checked;
+
+      if (!workerName) { toast('请输入 Worker 名称', 'error'); return; }
+
+      try {
+        await dispatchWorkflow('fetch.yml', {
+          worker_name: workerName,
+          debug_mode: String(debug),
+        });
+        toast('✅ 已触发拉取，完成后将自动更新版本管理列表', 'success');
+        state.lastWorkflow = 'fetch.yml';
+        setTimeout(startDeployPoll, 1500);
+      } catch (e) {
+        toast('触发失败：' + e.message, 'error');
+      }
+    }
+
+    async function dispatchWorkflow(workflowFile, inputs) {
+      await gh('/repos/' + state.repo + '/actions/workflows/' + workflowFile + '/dispatches', {
         method: 'POST',
         body: JSON.stringify({ ref: state.defaultBranch, inputs }),
       });
@@ -2252,7 +2236,7 @@
       const el = document.getElementById('runs-list');
 
       try {
-        const data = await gh('/repos/' + state.repo + '/actions/runs?per_page=8&workflow_id=deploy.yml');
+        const data = await gh('/repos/' + state.repo + '/actions/runs?per_page=8');
         const runs = data.workflow_runs || [];
 
         if (!runs.length) {
@@ -2559,7 +2543,11 @@
         }
 
         try {
-          const data  = await gh('/repos/' + state.repo + '/actions/runs?per_page=3&workflow_id=deploy.yml');
+          const workflowId = state.lastWorkflow || '';
+          const query = workflowId
+            ? '/repos/' + state.repo + '/actions/runs?per_page=3&workflow_id=' + workflowId
+            : '/repos/' + state.repo + '/actions/runs?per_page=3';
+          const data  = await gh(query);
           const runs  = data.workflow_runs || [];
           const active = runs.some(r => r.status === 'queued' || r.status === 'in_progress');
 
@@ -2681,9 +2669,6 @@
       const theme = saved || (prefersDark ? 'dark' : 'light');
       document.documentElement.dataset.theme = theme;
       document.getElementById('theme-toggle').textContent = theme === 'dark' ? '🌙' : '☀️';
-
-      // 命令Tab 初始状态
-      document.getElementById('cmd-textarea-row').style.display = 'block';
 
       // ── 自动恢复会话（页面刷新 / 切换桌面模式后免重新登录）────
       const savedPat    = sessionStorage.getItem('cf_pat');
