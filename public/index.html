@@ -1341,7 +1341,7 @@
         <div class="card">
           <div class="card-header">
             <div class="card-title">📦 版本管理</div>
-            <button class="btn btn-secondary btn-sm" onclick="loadVersions()">🔄 刷新</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadVersionsSilent()">🔄 刷新</button>
           </div>
           <div class="card-body" style="padding:0;">
             <div id="versions-list">
@@ -2123,6 +2123,8 @@
 
     function renderZipItem(f) {
       const sid = f.sha.substring(0, 8);
+      const path = f.path;
+      const dl   = f.download_url || '';
       return '<div class="version-item" id="ver-' + sid + '">' +
         '<div class="version-info">' +
           '<div class="version-icon">🗜️</div>' +
@@ -2132,14 +2134,10 @@
           '</div>' +
         '</div>' +
         '<div class="version-actions">' +
-          '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + f.path + '\',\'' + sid + '\')">🚀 部署</button>' +
-          '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + f.download_url + '\')">⬇ 下载</button>' +
-          '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + f.path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
-          '<label class="debug-toggle" title="开启后可在 GitHub Actions 查看完整日志">' +
-            '<input type="checkbox" id="dbg-' + sid + '">' +
-            '<span class="debug-toggle-track"></span>' +
-            '<span class="debug-toggle-label">调试模式</span>' +
-          '</label>' +
+          '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + path + '\', false)">🚀 部署</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="deployVersion(\'' + path + '\', true)" title="开启调试模式部署，GitHub Actions 将输出完整日志">🐛 调试</button>' +
+          (dl ? '<button class="btn btn-secondary btn-sm" onclick="downloadVersion(\'' + f.name + '\',\'' + dl + '\')">⬇ 下载</button>' : '') +
+          '<button class="btn btn-danger btn-sm" onclick="deleteVersion(\'' + path + '\',\'' + f.sha + '\')">🗑 删除</button>' +
         '</div>' +
       '</div>';
     }
@@ -2171,13 +2169,15 @@
     let _zipList = [];
     function updateCmdZipSelect(zips) { _zipList = zips; }
 
-    async function deployVersion(filepath) {
-      const debugId = filepath.replace(/[^a-z0-9]/gi, '').substring(0, 8);
-      const debug = document.getElementById('dbg-' + debugId)?.checked || false;
-      await dispatchWorkflow('deploy.yml', { zip_file: filepath, debug_mode: String(debug) });
-      state.lastWorkflow = 'deploy.yml';
-      toast('已触发部署：' + filepath, 'success');
-      setTimeout(startDeployPoll, 1500);
+    async function deployVersion(filepath, debug) {
+      try {
+        await dispatchWorkflow('deploy.yml', { zip_file: filepath, debug_mode: String(!!debug) });
+        state.lastWorkflow = 'deploy.yml';
+        toast(debug ? '🐛 已触发调试部署：' + filepath : '🚀 已触发部署：' + filepath, 'success');
+        setTimeout(startDeployPoll, 1500);
+      } catch (e) {
+        toast('触发失败：' + e.message, 'error');
+      }
     }
 
     async function downloadVersion(filename, downloadUrl) {
